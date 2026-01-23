@@ -16,8 +16,17 @@ func (r *Runtime) TickOnce() Decisions {
 }
 
 func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
-	return Snapshot{
+	snap := Snapshot{
 		Tick:   r.tick,
 		SelfID: a.ID(),
 	}
+
+	if pos, ok := r.world.PositionOf(a.ID()); ok {
+		snap.Position = Position{
+			X: pos.X,
+			Y: pos.Y,
+		}
+	}
+
+	return snap
 }

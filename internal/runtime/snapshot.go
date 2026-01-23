@@ -10,10 +10,10 @@ type TileView struct {
 }
 
 type Snapshot struct {
-	Tick      int
-	SelfID    string
-	Positions Position
-	Health    int
-	Energy    int
-	Visible   []TileView
+	Tick     int
+	SelfID   string
+	Position Position
+	Health   int
+	Energy   int
+	Visible  []TileView
 }
