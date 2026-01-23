@@ -12,10 +12,18 @@ type Runtime struct {
 }
 
 func New(agents []agent.Agent) *Runtime {
+	w := world.New()
+
+	for i, a := range agents {
+		w.SetPosition(a.ID(), world.Position{
+			X: i,
+			Y: 0,
+		})
+	}
 	return &Runtime{
 		tick:   0,
 		agents: agents,
-		world:  world.New(),
+		world:  w,
 	}
 }
 
