@@ -1,0 +1,11 @@
+{
+    "MOVE_N": 0,
+    "MOVE_S": 1,
+    "MOVE_E": 2,
+    "MOVE_W": 3,
+    "GATHER": 4,
+    "ATTACK": 5,
+    "HIDE": 6,
+    "OBSERVE": 7,
+    "WAIT": 8
+}
