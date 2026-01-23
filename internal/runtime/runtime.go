@@ -34,3 +34,12 @@ func (r *Runtime) Tick() int {
 func (r *Runtime) advanceTick() {
 	r.tick++
 }
+
+func (r *Runtime) SnapshotForDebug(agentID string) (Snapshot, bool) {
+	for _, a := range r.agents {
+		if a.ID() == agentID {
+			return r.snapshotFor(a), true
+		}
+	}
+	return Snapshot{}, false
+}
