@@ -10,7 +10,7 @@ type TileView struct {
 }
 
 type Snapshot struct {
-	tick      int
+	Tick      int
 	SelfID    string
 	Positions Position
 	Health    int

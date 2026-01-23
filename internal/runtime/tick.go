@@ -16,5 +16,8 @@ func (r *Runtime) TickOnce() Decisions {
 }
 
 func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
-	return Snapshot{}
+	return Snapshot{
+		Tick:   r.tick,
+		SelfID: a.ID(),
+	}
 }
