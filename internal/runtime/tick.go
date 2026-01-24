@@ -5,7 +5,6 @@ import (
 
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/game"
-	"github.com/divijg19/Nightshade/internal/world"
 )
 
 type Decisions map[string]agent.Action
@@ -47,11 +46,6 @@ func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
 	}
 
 	return snap
-}
-
-func applyMovement(pos world.Position, action agent.Action) world.Position {
-	// removed: movement now resolved in internal/game.ResolveMovement
-	return pos
 }
 
 func printDebugSnapshot(s Snapshot) {

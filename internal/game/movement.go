@@ -1,8 +1,8 @@
 package game
 
 import (
-    "github.com/divijg19/Nightshade/internal/agent"
-    "github.com/divijg19/Nightshade/internal/world"
+	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/world"
 )
 
 // ResolveMovement is a pure function that computes the new position resulting
