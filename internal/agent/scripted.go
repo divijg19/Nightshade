@@ -1,7 +1,5 @@
 package agent
 
-import "reflect"
-
 type Scripted struct {
 	id string
 }
@@ -33,32 +31,15 @@ func (o *Oscillating) ID() string {
 }
 
 func (o *Oscillating) Decide(snapshot Snapshot) Action {
-	// snapshot is an opaque interface. Use reflection to read the exported
-	// Tick field (runtime.Snapshot has exported Tick int). This avoids
-	// importing the runtime package and avoids circular deps.
-	importReflect := func(s Snapshot) int {
-		// lazily use reflect to extract Tick
-		// keep zero default if anything unexpected
-		tick := 0
-		if s == nil {
-			return tick
+	// Prefer a typed accessor if available to avoid reflection.
+
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		if t.TickValue()%2 == 0 {
+			return MOVE_N
 		}
-		v := reflect.ValueOf(s)
-		if v.Kind() == reflect.Ptr {
-			v = v.Elem()
-		}
-		if v.Kind() == reflect.Struct {
-			f := v.FieldByName("Tick")
-			if f.IsValid() && f.CanInt() {
-				tick = int(f.Int())
-			}
-		}
-		return tick
+		return MOVE_S
 	}
 
-	tick := importReflect(snapshot)
-	if tick%2 == 0 {
-		return MOVE_N
-	}
-	return MOVE_S
+	// Fallback: treat as even tick
+	return MOVE_N
 }

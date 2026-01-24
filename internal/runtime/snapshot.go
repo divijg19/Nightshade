@@ -17,3 +17,6 @@ type Snapshot struct {
 	Energy   int
 	Visible  []TileView
 }
+
+// TickValue returns the current tick for compatibility with agent-side accessors.
+func (s Snapshot) TickValue() int { return s.Tick }
