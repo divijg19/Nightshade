@@ -9,7 +9,7 @@ import (
 
 func main() {
 	a1 := agent.NewScripted("A")
-	a2 := agent.NewScripted("B")
+	a2 := agent.NewOscillating("B")
 
 	rt := runtime.New([]agent.Agent{a1, a2})
 

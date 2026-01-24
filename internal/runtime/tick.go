@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"fmt"
+
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/game"
 	"github.com/divijg19/Nightshade/internal/world"
 )
 
@@ -14,11 +17,16 @@ func (r *Runtime) TickOnce() Decisions {
 		action := a.Decide(snapshot)
 		decisions[a.ID()] = action
 
+		// Print debug snapshot for this agent (use public SnapshotForDebug accessor)
+		if dbgSnap, ok := r.SnapshotForDebug(a.ID()); ok {
+			printDebugSnapshot(dbgSnap)
+		}
+
 		pos, ok := r.world.PositionOf(a.ID())
 		if !ok {
 			continue
 		}
-		newPos := applyMovement(pos, action)
+		newPos := game.ResolveMovement(pos, action)
 		r.world.SetPosition(a.ID(), newPos)
 	}
 	r.advanceTick()
@@ -42,16 +50,10 @@ func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
 }
 
 func applyMovement(pos world.Position, action agent.Action) world.Position {
-	switch action {
-	case 0: // MOVE_N
-		return world.Position{X: pos.X, Y: pos.Y - 1}
-	case 1: // MOVE_S
-		return world.Position{X: pos.X, Y: pos.Y + 1}
-	case 2: // MOVE_E
-		return world.Position{X: pos.X + 1, Y: pos.Y}
-	case 3: // MOVE_W
-		return world.Position{X: pos.X - 1, Y: pos.Y}
-	default:
-		return pos
-	}
+	// removed: movement now resolved in internal/game.ResolveMovement
+	return pos
+}
+
+func printDebugSnapshot(s Snapshot) {
+	fmt.Printf("Tick %d Agent %s Position=(%d,%d) Health=%d Energy=%d\n", s.Tick, s.SelfID, s.Position.X, s.Position.Y, s.Health, s.Energy)
 }
