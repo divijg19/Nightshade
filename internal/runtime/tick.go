@@ -11,16 +11,28 @@ func (r *Runtime) TickOnce() Decisions {
 	decisions := make(Decisions)
 
 	for _, a := range r.agents {
-		snapshot := r.snapshotFor(a, agent.Action(-1))
-		action := a.Decide(snapshot)
+		// 1. Pre-action observation
+		preSnap := r.snapshotFor(a, agent.Action(-1))
+
+		// 2. Decide
+		action := a.Decide(preSnap)
 		decisions[a.ID()] = action
 
+		// 3. Apply movement
 		pos, ok := r.world.PositionOf(a.ID())
 		if !ok {
 			continue
 		}
-		newPos := game.ResolveMovement(pos, action, r.world.Width(), r.world.Height())
+		newPos := game.ResolveMovement(
+			pos,
+			action,
+			r.world.Width(),
+			r.world.Height(),
+		)
 		r.world.SetPosition(a.ID(), newPos)
+
+		// 4. Post-action observation (THIS WAS MISSING)
+		_ = r.snapshotFor(a, action)
 	}
 
 	r.advanceTick()
