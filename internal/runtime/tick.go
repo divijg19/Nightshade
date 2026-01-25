@@ -65,7 +65,7 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		r.world.Height(),
 		radius,
 	)
-
+	snap.Known = snap.Visible
 	return snap
 }
 
@@ -88,6 +88,7 @@ func computeVisibleTiles(
 			tiles = append(tiles, TileView{
 				Position: Position{X: x, Y: y},
 				Glyph:    0, // placeholder, no terrain yet
+				Visible:  true,
 			})
 
 		}

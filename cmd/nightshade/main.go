@@ -25,6 +25,11 @@ func main() {
 		}
 		if snap, ok := rt.SnapshotForDebug("A"); ok {
 			fmt.Printf("Agent A sees %d tiles: %+v\n", len(snap.Visible), snap.Visible)
+			fmt.Printf(
+				"Agent A sees %d tiles, knows %d tiles\n",
+				len(snap.Visible),
+				len(snap.Known),
+			)
 		}
 	}
 }
