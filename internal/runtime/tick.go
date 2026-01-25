@@ -11,7 +11,7 @@ func (r *Runtime) TickOnce() Decisions {
 	decisions := make(Decisions)
 
 	for _, a := range r.agents {
-		snapshot := r.snapshotFor(a)
+		snapshot := r.snapshotFor(a, agent.Action(-1))
 		action := a.Decide(snapshot)
 		decisions[a.ID()] = action
 
@@ -27,7 +27,7 @@ func (r *Runtime) TickOnce() Decisions {
 	return decisions
 }
 
-func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
+func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 	snap := Snapshot{
 		Tick:   r.tick,
 		SelfID: a.ID(),
@@ -41,13 +41,17 @@ func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
 		X: pos.X,
 		Y: pos.Y,
 	}
+	radius := defaultVisibilityRadius
+	if action == agent.Action(agent.OBSERVE) {
+		radius = defaultVisibilityRadius * 2
+	}
 
 	snap.Visible = computeVisibleTiles(
 		pos.X,
 		pos.Y,
 		r.world.Width(),
 		r.world.Height(),
-		defaultVisibilityRadius,
+		radius,
 	)
 
 	return snap

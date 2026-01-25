@@ -40,7 +40,7 @@ func (r *Runtime) advanceTick() {
 func (r *Runtime) SnapshotForDebug(agentID string) (Snapshot, bool) {
 	for _, a := range r.agents {
 		if a.ID() == agentID {
-			return r.snapshotFor(a), true
+			return r.snapshotFor(a, agent.Action(-1)), true
 		}
 	}
 	return Snapshot{}, false
