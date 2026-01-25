@@ -13,7 +13,6 @@ func (s *Scripted) ID() string {
 }
 
 func (s *Scripted) Decide(snapshot Snapshot) Action {
-	// Always move east
 	return MOVE_E
 }
 
