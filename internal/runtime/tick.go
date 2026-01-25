@@ -33,12 +33,49 @@ func (r *Runtime) snapshotFor(a agent.Agent) Snapshot {
 		SelfID: a.ID(),
 	}
 
-	if pos, ok := r.world.PositionOf(a.ID()); ok {
-		snap.Position = Position{
-			X: pos.X,
-			Y: pos.Y,
+	pos, ok := r.world.PositionOf(a.ID())
+	if !ok {
+		return snap
+	}
+	snap.Position = Position{
+		X: pos.X,
+		Y: pos.Y,
+	}
+
+	snap.Visible = computeVisibleTiles(
+		pos.X,
+		pos.Y,
+		r.world.Width(),
+		r.world.Height(),
+		defaultVisibilityRadius,
+	)
+
+	return snap
+}
+
+func computeVisibleTiles(
+	ax, ay int,
+	worldWidth, worldHeight int,
+	radius int,
+) []TileView {
+	tiles := []TileView{}
+
+	for dx := -radius; dx <= radius; dx++ {
+		for dy := -radius; dy <= radius; dy++ {
+			x := ax + dx
+			y := ay + dy
+
+			if x < 0 || y < 0 || x >= worldWidth || y >= worldHeight {
+				continue
+			}
+
+			tiles = append(tiles, TileView{
+				Position: Position{X: x, Y: y},
+				Glyph:    0, // placeholder, no terrain yet
+			})
+
 		}
 	}
 
-	return snap
+	return tiles
 }

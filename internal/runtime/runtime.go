@@ -5,6 +5,8 @@ import (
 	"github.com/divijg19/Nightshade/internal/world"
 )
 
+const defaultVisibilityRadius = 2
+
 type Runtime struct {
 	tick   int
 	agents []agent.Agent
@@ -12,7 +14,7 @@ type Runtime struct {
 }
 
 func New(agents []agent.Agent) *Runtime {
-	w := world.New(20, 10) // Initial dimeonsions of the world, will change to 20x20
+	w := world.New(10, 10) // Initial dimeonsions of the world, will change to 20x20
 
 	for i, a := range agents {
 		w.SetPosition(a.ID(), world.Position{
