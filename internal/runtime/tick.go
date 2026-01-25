@@ -19,7 +19,7 @@ func (r *Runtime) TickOnce() Decisions {
 		if !ok {
 			continue
 		}
-		newPos := game.ResolveMovement(pos, action)
+		newPos := game.ResolveMovement(pos, action, r.world.Width(), r.world.Height())
 		r.world.SetPosition(a.ID(), newPos)
 	}
 

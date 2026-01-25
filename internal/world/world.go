@@ -12,13 +12,25 @@ type Position struct {
 }
 
 type World struct {
+	width    int
+	height   int
 	entities map[string]Position
 }
 
-func New() *World {
+func New(width, height int) *World {
 	return &World{
+		width:    width,
+		height:   height,
 		entities: make(map[string]Position),
 	}
+}
+
+func (w *World) Width() int {
+	return w.width
+}
+
+func (w *World) Height() int {
+	return w.height
 }
 
 func (w *World) PositionOf(id string) (Position, bool) {
