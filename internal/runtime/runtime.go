@@ -12,7 +12,7 @@ type Runtime struct {
 }
 
 func New(agents []agent.Agent) *Runtime {
-	w := world.New()
+	w := world.New(20, 10) // Initial dimeonsions of the world, will change to 20x20
 
 	for i, a := range agents {
 		w.SetPosition(a.ID(), world.Position{
