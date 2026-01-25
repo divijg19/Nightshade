@@ -7,6 +7,7 @@ type Position struct {
 type TileView struct {
 	Position Position
 	Glyph    rune
+	Visible  bool
 }
 
 type Snapshot struct {
@@ -16,6 +17,7 @@ type Snapshot struct {
 	Health   int
 	Energy   int
 	Visible  []TileView
+	Known    []TileView
 }
 
 // TickValue returns the current tick for compatibility with agent-side accessors.
