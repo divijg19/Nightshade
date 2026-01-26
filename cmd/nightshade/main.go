@@ -25,12 +25,13 @@ func main() {
 			fmt.Printf("  Agent A position: %+v\n", snapA.Position)
 		}
 		if snap, ok := rt.SnapshotForDebug("A"); ok {
+			// Debug: 'sees' is current visibility, 'believes' is agent memory
 			fmt.Printf("Agent A sees %d tiles: %+v\n", len(snap.Visible), snap.Visible)
-			fmt.Printf(
-				"Agent A sees %d tiles, knows %d tiles\n",
-				len(snap.Visible),
-				len(snap.Known),
-			)
+			if s, ok := a1.(*agent.Scripted); ok {
+				fmt.Printf("Agent A sees %d tiles, believes %d tiles\n", len(snap.Visible), s.Memory().Count())
+			} else {
+				fmt.Printf("Agent A sees %d tiles\n", len(snap.Visible))
+			}
 		}
 		if s, ok := a1.(*agent.Scripted); ok {
 			fmt.Printf("Agent A remembers %d tiles\n", s.Memory().Count())
