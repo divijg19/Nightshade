@@ -50,6 +50,21 @@ func main() {
 					}
 				}
 
+				// Reconstruct intended action (Scripted always intends MOVE_E).
+				// Compute target from snapshot Position.
+				target := core.Position{X: snap.Position.X + 1, Y: snap.Position.Y}
+				if mt, ok := s.Memory().GetMemoryTile(target); ok {
+					age := rt.Tick() - mt.LastSeen
+					if age > agent.CautionThreshold && decisions["A"] == agent.WAIT {
+						fmt.Printf("Agent A intends MOVE_E -> target age=%d -> WAIT (caution)\n", age)
+					} else {
+						fmt.Printf("Agent A moves MOVE_E (target age=%d)\n", age)
+					}
+				} else {
+					// Tile never seen -> moves
+					fmt.Printf("Agent A intends MOVE_E -> target unseen -> moves\n")
+				}
+
 				// Debug: show age for a remembered tile (if any) to demonstrate age growth
 				if s.Memory().Count() > 0 {
 					mts := s.Memory().All()

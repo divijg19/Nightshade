@@ -19,3 +19,7 @@ const (
 	OBSERVE Action = 7
 	WAIT    Action = 8
 )
+
+// CautionThreshold defines how many ticks since last observation make a
+// tile "risky". If Age > CautionThreshold agents will hesitate.
+const CautionThreshold = 3
