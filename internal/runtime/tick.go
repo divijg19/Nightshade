@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/game"
 )
 
@@ -49,7 +50,7 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 	if !ok {
 		return snap
 	}
-	snap.Position = Position{
+	snap.Position = core.Position{
 		X: pos.X,
 		Y: pos.Y,
 	}
@@ -73,8 +74,8 @@ func computeVisibleTiles(
 	ax, ay int,
 	worldWidth, worldHeight int,
 	radius int,
-) []TileView {
-	tiles := []TileView{}
+) []core.TileView {
+	tiles := []core.TileView{}
 
 	for dx := -radius; dx <= radius; dx++ {
 		for dy := -radius; dy <= radius; dy++ {
@@ -85,8 +86,8 @@ func computeVisibleTiles(
 				continue
 			}
 
-			tiles = append(tiles, TileView{
-				Position: Position{X: x, Y: y},
+			tiles = append(tiles, core.TileView{
+				Position: core.Position{X: x, Y: y},
 				Glyph:    0, // placeholder, no terrain yet
 				Visible:  true,
 			})

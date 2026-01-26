@@ -14,7 +14,9 @@ type Runtime struct {
 }
 
 func New(agents []agent.Agent) *Runtime {
-	w := world.New(10, 10) // Initial dimeonsions of the world, will change to 20x20
+	// Use the package bounds constants to construct the world so tests
+	// that reference `world.Width`/`world.Height` match runtime size.
+	w := world.New(world.Width, world.Height)
 
 	for i, a := range agents {
 		w.SetPosition(a.ID(), world.Position{
