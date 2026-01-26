@@ -66,7 +66,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		r.world.Height(),
 		radius,
 	)
-	snap.Known = snap.Visible
+	// Do NOT populate snap.Known here. Known is the agent's interpretation
+	// (belief) and must be maintained by the agent's Memory. Runtime reports
+	// only current visibility in Snapshot.Visible.
 	return snap
 }
 

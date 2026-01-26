@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/divijg19/Nightshade/internal/core"
+
 type Scripted struct {
 	id     string
 	memory *Memory
@@ -16,9 +18,27 @@ func (s *Scripted) ID() string {
 }
 
 func (s *Scripted) Decide(snapshot Snapshot) Action {
+	// Update memory only from what is currently visible.
 	if s.memory != nil {
-		s.memory.UpdateFromSnapshot(snapshot)
+		s.memory.UpdateFromVisible(snapshot)
 	}
+
+	// Build an agent-side Observation (belief = memory.All()). Agents may
+	// start to act on Observation in later steps; for now we ignore it.
+	var vis []core.TileView
+	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
+		vis = v.VisibleTiles()
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	obs := Observation{
+		Visible: vis,
+		Known:   s.memory.All(),
+		Tick:    tick,
+	}
+	_ = obs
 	return MOVE_E
 }
 
@@ -44,22 +64,37 @@ func (o *Oscillating) ID() string {
 }
 
 func (o *Oscillating) Decide(snapshot Snapshot) Action {
-	// Prefer a typed accessor if available to avoid reflection.
-	{
-		if o.memory != nil {
-			o.memory.UpdateFromSnapshot(snapshot)
-		}
-
-		if t, ok := snapshot.(interface{ TickValue() int }); ok {
-			if t.TickValue()%2 == 0 {
-				return MOVE_N
-			}
-			return MOVE_S
-		}
-
-		// Fallback: treat as even tick
-		return MOVE_N
+	// Update memory from visible tiles only.
+	if o.memory != nil {
+		o.memory.UpdateFromVisible(snapshot)
 	}
+
+	// Build agent-side Observation for future use; currently ignored.
+	var vis []core.TileView
+	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
+		vis = v.VisibleTiles()
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	obs := Observation{
+		Visible: vis,
+		Known:   o.memory.All(),
+		Tick:    tick,
+	}
+	_ = obs
+
+	// Decide using tick parity as before.
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		if t.TickValue()%2 == 0 {
+			return MOVE_N
+		}
+		return MOVE_S
+	}
+
+	// Fallback: treat as even tick
+	return MOVE_N
 }
 
 // Memory exposes the agent's memory for external inspection in tools/tests.

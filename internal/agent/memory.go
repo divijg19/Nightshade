@@ -13,21 +13,33 @@ func NewMemory() *Memory {
 	return &Memory{tiles: make(map[core.Position]core.TileView)}
 }
 
-// UpdateFromSnapshot accepts an opaque observation and updates memory if the
-// observation exposes KnownTiles() []core.TileView. This uses a capability
+// UpdateFromVisible accepts an opaque observation and updates memory only
+// from what the runtime reports as currently visible. This uses a capability
 // interface rather than depending on runtime concrete types.
-func (m *Memory) UpdateFromSnapshot(obs interface{}) {
+func (m *Memory) UpdateFromVisible(obs interface{}) {
 	if m == nil {
 		return
 	}
-	type knowner interface {
-		KnownTiles() []core.TileView
+	type visorner interface {
+		VisibleTiles() []core.TileView
 	}
-	if k, ok := obs.(knowner); ok {
-		for _, tv := range k.KnownTiles() {
+	if v, ok := obs.(visorner); ok {
+		for _, tv := range v.VisibleTiles() {
 			m.tiles[tv.Position] = tv
 		}
 	}
+}
+
+// All returns all TileViews currently remembered in memory.
+func (m *Memory) All() []core.TileView {
+	if m == nil {
+		return nil
+	}
+	out := make([]core.TileView, 0, len(m.tiles))
+	for _, tv := range m.tiles {
+		out = append(out, tv)
+	}
+	return out
 }
 
 // Count returns the number of known tiles in memory.
