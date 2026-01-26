@@ -33,9 +33,15 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 	if t, ok := snapshot.(interface{ TickValue() int }); ok {
 		tick = t.TickValue()
 	}
+	// Build Known beliefs from memory: compute Age = obs.Tick - LastSeen
+	known := []Belief{}
+	for _, mt := range s.memory.All() {
+		age := tick - mt.LastSeen
+		known = append(known, Belief{Tile: mt.Tile, Age: age})
+	}
 	obs := Observation{
 		Visible: vis,
-		Known:   s.memory.All(),
+		Known:   known,
 		Tick:    tick,
 	}
 	_ = obs
@@ -78,9 +84,14 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 	if t, ok := snapshot.(interface{ TickValue() int }); ok {
 		tick = t.TickValue()
 	}
+	known := []Belief{}
+	for _, mt := range o.memory.All() {
+		age := tick - mt.LastSeen
+		known = append(known, Belief{Tile: mt.Tile, Age: age})
+	}
 	obs := Observation{
 		Visible: vis,
-		Known:   o.memory.All(),
+		Known:   known,
 		Tick:    tick,
 	}
 	_ = obs
