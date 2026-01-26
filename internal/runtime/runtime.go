@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/world"
 )
 
@@ -46,4 +47,12 @@ func (r *Runtime) SnapshotForDebug(agentID string) (Snapshot, bool) {
 		}
 	}
 	return Snapshot{}, false
+}
+
+// MarkerPosition returns the authoritative marker position in world
+// coordinates. This is a debug accessor and does not expose agent memory
+// or change any semantics.
+func (r *Runtime) MarkerPosition() core.Position {
+	mp := r.world.MarkerPosition()
+	return core.Position{X: mp.X, Y: mp.Y}
 }

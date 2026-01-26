@@ -9,6 +9,9 @@ import (
 type Decisions map[string]agent.Action
 
 func (r *Runtime) TickOnce() Decisions {
+	// Advance non-agent world facts before agents observe.
+	r.world.MoveMarker()
+
 	decisions := make(Decisions)
 
 	for _, a := range r.agents {
@@ -59,12 +62,15 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		radius = defaultVisibilityRadius * 2
 	}
 
+	markerPos := r.world.MarkerPosition()
 	snap.Visible = computeVisibleTiles(
 		pos.X,
 		pos.Y,
 		r.world.Width(),
 		r.world.Height(),
 		radius,
+		markerPos.X,
+		markerPos.Y,
 	)
 	// Do NOT populate snap.Known here. Known is the agent's interpretation
 	// (belief) and must be maintained by the agent's Memory. Runtime reports
@@ -76,6 +82,7 @@ func computeVisibleTiles(
 	ax, ay int,
 	worldWidth, worldHeight int,
 	radius int,
+	markerX, markerY int,
 ) []core.TileView {
 	tiles := []core.TileView{}
 
@@ -88,9 +95,15 @@ func computeVisibleTiles(
 				continue
 			}
 
+			glyph := rune(0)
+			// Reveal marker if within visibility by comparing to
+			// the passed-in marker coordinates.
+			if markerX == x && markerY == y {
+				glyph = 'M'
+			}
 			tiles = append(tiles, core.TileView{
 				Position: core.Position{X: x, Y: y},
-				Glyph:    0, // placeholder, no terrain yet
+				Glyph:    glyph,
 				Visible:  true,
 			})
 
