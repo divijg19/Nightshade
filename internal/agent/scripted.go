@@ -64,7 +64,7 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 	}
 
 	// Decision flow: compute intended action (existing behavior), then
-	// potentially override with WAIT if target belief is stale.
+	// potentially override with OBSERVE if target belief is stale.
 	intended := MOVE_E
 
 	// If intended is a move, compute target from agent's current position.
@@ -73,7 +73,9 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 			if mt, found := s.memory.GetMemoryTile(tgt); found {
 				age := tick - mt.LastSeen
 				if age > CautionThreshold {
-					return WAIT
+					// Prefer to OBSERVE (refresh visible belief) instead of a blind WAIT.
+					// OBSERVE consumes one tick and refreshes memory from Visible (already done above).
+					return OBSERVE
 				}
 			}
 		}
@@ -147,7 +149,8 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 			if mt, found := o.memory.GetMemoryTile(tgt); found {
 				age := tick - mt.LastSeen
 				if age > CautionThreshold {
-					return WAIT
+					// Prefer to OBSERVE to refresh belief instead of WAITing silently.
+					return OBSERVE
 				}
 			}
 		}

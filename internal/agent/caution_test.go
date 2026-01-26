@@ -15,7 +15,7 @@ func (f fakeSnapPos) VisibleTiles() []core.TileView { return nil }
 func (f fakeSnapPos) TickValue() int                { return f.tick }
 func (f fakeSnapPos) PositionValue() core.Position  { return f.pos }
 
-func TestScriptedCautionWaitsWhenStale(t *testing.T) {
+func TestScriptedCautionObservesWhenStale(t *testing.T) {
 	s := NewScripted("T")
 	// place agent at (0,0), intended MOVE_E target is (1,0)
 	tick := 10
@@ -25,15 +25,15 @@ func TestScriptedCautionWaitsWhenStale(t *testing.T) {
 
 	snap := fakeSnapPos{pos: core.Position{X: 0, Y: 0}, tick: tick}
 	act := s.Decide(snap)
-	if act != WAIT {
-		t.Fatalf("expected WAIT due to stale belief, got %v", act)
+	if act != OBSERVE {
+		t.Fatalf("expected OBSERVE due to stale belief, got %v", act)
 	}
 
-	// re-observe at tick -> should allow move
+	// re-observe at tick -> should allow move (i.e., not OBSERVE)
 	s.memory.tiles[target] = MemoryTile{Tile: core.TileView{Position: target}, LastSeen: tick}
 	act2 := s.Decide(snap)
-	if act2 == WAIT {
-		t.Fatalf("expected move allowed after re-observation, got WAIT")
+	if act2 == OBSERVE {
+		t.Fatalf("expected move allowed after re-observation, got OBSERVE")
 	}
 }
 
@@ -48,14 +48,14 @@ func TestOscillatingCaution(t *testing.T) {
 
 	snap := fakeSnapPos{pos: core.Position{X: 0, Y: 0}, tick: tick}
 	act := o.Decide(snap)
-	if act != WAIT {
-		t.Fatalf("expected WAIT for Oscillating due to stale belief, got %v", act)
+	if act != OBSERVE {
+		t.Fatalf("expected OBSERVE for Oscillating due to stale belief, got %v", act)
 	}
 
-	// refresh observation -> should move
+	// refresh observation -> should move (i.e., not OBSERVE)
 	o.memory.tiles[target] = MemoryTile{Tile: core.TileView{Position: target}, LastSeen: tick}
 	act2 := o.Decide(snap)
-	if act2 == WAIT {
-		t.Fatalf("expected move after re-observation, got WAIT")
+	if act2 == OBSERVE {
+		t.Fatalf("expected move after re-observation, got OBSERVE")
 	}
 }

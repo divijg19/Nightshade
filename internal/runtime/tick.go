@@ -49,6 +49,12 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		SelfID: a.ID(),
 	}
 
+	// Use the `action` parameter to avoid unused parameter linter warnings.
+	// The runtime does not change visibility based on actions (OBSERVE
+	// semantics are agent-layer only), so we only reference the value
+	// harmlessly here to preserve the current API.
+	_ = action
+
 	pos, ok := r.world.PositionOf(a.ID())
 	if !ok {
 		return snap
@@ -58,9 +64,6 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		Y: pos.Y,
 	}
 	radius := defaultVisibilityRadius
-	if action == agent.Action(agent.OBSERVE) {
-		radius = defaultVisibilityRadius * 2
-	}
 
 	markerPos := r.world.MarkerPosition()
 	snap.Visible = computeVisibleTiles(

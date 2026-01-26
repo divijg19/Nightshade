@@ -38,7 +38,7 @@ func main() {
 				for _, mt := range s.Memory().All() {
 					if mt.Tile.Glyph == 'M' {
 						believed = append(believed, mt.Tile.Position)
-						age := rt.Tick() - mt.LastSeen
+						age := snap.Tick - mt.LastSeen
 						fmt.Printf("Agent believes marker at %v, last seen %d ticks ago\n", mt.Tile.Position, age)
 					}
 				}
@@ -54,9 +54,9 @@ func main() {
 				// Compute target from snapshot Position.
 				target := core.Position{X: snap.Position.X + 1, Y: snap.Position.Y}
 				if mt, ok := s.Memory().GetMemoryTile(target); ok {
-					age := rt.Tick() - mt.LastSeen
-					if age > agent.CautionThreshold && decisions["A"] == agent.WAIT {
-						fmt.Printf("Agent A intends MOVE_E -> target age=%d -> WAIT (caution)\n", age)
+					age := snap.Tick - mt.LastSeen
+					if age > agent.CautionThreshold && decisions["A"] == agent.OBSERVE {
+						fmt.Printf("Agent A intends MOVE_E -> target age=%d -> OBSERVE (caution)\n", age)
 					} else {
 						fmt.Printf("Agent A moves MOVE_E (target age=%d)\n", age)
 					}
@@ -65,11 +65,23 @@ func main() {
 					fmt.Printf("Agent A intends MOVE_E -> target unseen -> moves\n")
 				}
 
+			// If the agent chose to OBSERVE, print detailed refresh debug lines.
+			if decisions["A"] == agent.OBSERVE {
+				visCount := len(snap.Visible)
+				fmt.Printf("Agent A OBSERVES -> refreshing belief for %d visible tiles\n", visCount)
+				for _, vtv := range snap.Visible {
+					if mt, ok := s.Memory().GetMemoryTile(vtv.Position); ok {
+						age := snap.Tick - mt.LastSeen
+						fmt.Printf("Tile (%d,%d) belief age reset to %d\n", vtv.Position.X, vtv.Position.Y, age)
+					}
+				}
+			}
+
 				// Debug: show age for a remembered tile (if any) to demonstrate age growth
 				if s.Memory().Count() > 0 {
 					mts := s.Memory().All()
 					mt := mts[0]
-					age := rt.Tick() - mt.LastSeen
+					age := snap.Tick - mt.LastSeen
 					// Check whether the tile is currently visible (age should be 0)
 					visibleNow := false
 					for _, vtv := range snap.Visible {
