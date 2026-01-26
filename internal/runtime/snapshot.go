@@ -25,3 +25,8 @@ func (s Snapshot) VisibleTiles() []core.TileView { return s.Visible }
 
 // TickValue returns the current tick for compatibility with agent-side accessors.
 func (s Snapshot) TickValue() int { return s.Tick }
+
+// PositionValue returns the agent's current position for agent-side accessors.
+// This is a lightweight accessor that exposes the authoritative position but
+// does not expose any memory or age information.
+func (s Snapshot) PositionValue() core.Position { return s.Position }

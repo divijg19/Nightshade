@@ -72,3 +72,12 @@ func (m *Memory) Get(pos core.Position) (core.TileView, bool) {
 	}
 	return mt.Tile, true
 }
+
+// GetMemoryTile returns the MemoryTile for a position and whether it exists.
+func (m *Memory) GetMemoryTile(pos core.Position) (MemoryTile, bool) {
+	if m == nil {
+		return MemoryTile{}, false
+	}
+	mt, ok := m.tiles[pos]
+	return mt, ok
+}

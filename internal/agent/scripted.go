@@ -2,6 +2,24 @@ package agent
 
 import "github.com/divijg19/Nightshade/internal/core"
 
+// computeTarget returns the target position for a MOVE action relative to
+// the current position. The second return value is false when the action is
+// not a movement action.
+func computeTarget(pos core.Position, a Action) (core.Position, bool) {
+	switch a {
+	case MOVE_N:
+		return core.Position{X: pos.X, Y: pos.Y - 1}, true
+	case MOVE_S:
+		return core.Position{X: pos.X, Y: pos.Y + 1}, true
+	case MOVE_E:
+		return core.Position{X: pos.X + 1, Y: pos.Y}, true
+	case MOVE_W:
+		return core.Position{X: pos.X - 1, Y: pos.Y}, true
+	default:
+		return core.Position{}, false
+	}
+}
+
 type Scripted struct {
 	id     string
 	memory *Memory
@@ -44,8 +62,25 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		Known:   known,
 		Tick:    tick,
 	}
+
+	// Decision flow: compute intended action (existing behavior), then
+	// potentially override with WAIT if target belief is stale.
+	intended := MOVE_E
+
+	// If intended is a move, compute target from agent's current position.
+	if posv, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		if tgt, ok2 := computeTarget(posv.PositionValue(), intended); ok2 {
+			if mt, found := s.memory.GetMemoryTile(tgt); found {
+				age := tick - mt.LastSeen
+				if age > CautionThreshold {
+					return WAIT
+				}
+			}
+		}
+	}
+
 	_ = obs
-	return MOVE_E
+	return intended
 }
 
 // Memory exposes the agent's memory for external inspection in tools/tests.
@@ -96,16 +131,29 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 	}
 	_ = obs
 
-	// Decide using tick parity as before.
+	// Decide using tick parity as before, then apply caution check.
+	intended := MOVE_N
 	if t, ok := snapshot.(interface{ TickValue() int }); ok {
 		if t.TickValue()%2 == 0 {
-			return MOVE_N
+			intended = MOVE_N
+		} else {
+			intended = MOVE_S
 		}
-		return MOVE_S
 	}
 
-	// Fallback: treat as even tick
-	return MOVE_N
+	// If intended is a move, compute target from agent position and check age.
+	if posv, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		if tgt, ok2 := computeTarget(posv.PositionValue(), intended); ok2 {
+			if mt, found := o.memory.GetMemoryTile(tgt); found {
+				age := tick - mt.LastSeen
+				if age > CautionThreshold {
+					return WAIT
+				}
+			}
+		}
+	}
+
+	return intended
 }
 
 // Memory exposes the agent's memory for external inspection in tools/tests.
