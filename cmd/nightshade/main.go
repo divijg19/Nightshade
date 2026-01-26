@@ -8,10 +8,11 @@ import (
 )
 
 func main() {
-	a1 := agent.NewScripted("A")
-	a2 := agent.NewOscillating("B")
+	var a1 agent.Agent = agent.NewScripted("A")
+	var a2 agent.Agent = agent.NewOscillating("B")
 
-	rt := runtime.New([]agent.Agent{a1, a2})
+	rtAgents := []agent.Agent{a1, a2}
+	rt := runtime.New(rtAgents)
 
 	for i := 0; i < 5; i++ {
 		decisions := rt.TickOnce()
@@ -30,6 +31,9 @@ func main() {
 				len(snap.Visible),
 				len(snap.Known),
 			)
+		}
+		if s, ok := a1.(*agent.Scripted); ok {
+			fmt.Printf("Agent A remembers %d tiles\n", s.Memory().Count())
 		}
 	}
 }

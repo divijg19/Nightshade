@@ -1,23 +1,19 @@
 package runtime
 
-type Position struct {
-	X, Y int
-}
-
-type TileView struct {
-	Position Position
-	Glyph    rune
-	Visible  bool
-}
+import "github.com/divijg19/Nightshade/internal/core"
 
 type Snapshot struct {
 	Tick     int
 	SelfID   string
-	Position Position
+	Position core.Position
 	Health   int
 	Energy   int
-	Visible  []TileView
-	Known    []TileView
+	Visible  []core.TileView
+	Known    []core.TileView
+}
+
+func (s Snapshot) KnownTiles() []core.TileView {
+	return s.Known
 }
 
 // TickValue returns the current tick for compatibility with agent-side accessors.
