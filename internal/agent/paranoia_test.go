@@ -26,7 +26,8 @@ func TestParanoiaInjectsHallucination(t *testing.T) {
     mem.tiles[target] = MemoryTile{Tile: core.TileView{Position: target, Glyph: 'H'}, LastSeen: tick - (ParanoiaThreshold + 1)}
 
     snap := fakeSnapFull{tiles: nil, tick: tick}
-    obs := buildObservation(mem, snap)
+    prev := make(map[core.Position]int)
+    obs := buildObservation(mem, snap, prev, MaxEnergy, ParanoiaThreshold)
 
     // Visible should include hallucinated tile
     found := false
@@ -57,7 +58,8 @@ func TestParanoiaClearedByVisible(t *testing.T) {
     // Now simulate a new snapshot where the runtime truthfully shows the tile
     // (as would happen after an OBSERVE). The tick is advanced.
     snap := fakeSnapFull{tiles: []core.TileView{{Position: target, Glyph: 'Z', Visible: true}}, tick: prevTick}
-    obs := buildObservation(mem, snap)
+    prev := make(map[core.Position]int)
+    obs := buildObservation(mem, snap, prev, MaxEnergy, ParanoiaThreshold)
 
     // Tile should be present in Visible (truth takes precedence)
     found := false
