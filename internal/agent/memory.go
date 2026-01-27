@@ -24,9 +24,14 @@ func NewMemory() *Memory {
 // from what the runtime reports as currently visible. This uses a capability
 // interface rather than depending on runtime concrete types. When a tile is
 // visible we overwrite the stored Tile and set LastSeen = snapshot.TickValue().
-func (m *Memory) UpdateFromVisible(obs interface{}) {
+// UpdateFromVisible updates memory only from what the runtime reports as
+// currently visible. It returns a map of positions to their previous
+// LastSeen value (or -1 if not previously present) so callers can decide
+// how to treat recently-updated entries (useful for cognitive effects).
+func (m *Memory) UpdateFromVisible(obs interface{}) map[core.Position]int {
+	prev := make(map[core.Position]int)
 	if m == nil {
-		return
+		return prev
 	}
 	type visTicker interface {
 		VisibleTiles() []core.TileView
@@ -35,9 +40,15 @@ func (m *Memory) UpdateFromVisible(obs interface{}) {
 	if v, ok := obs.(visTicker); ok {
 		tick := v.TickValue()
 		for _, tv := range v.VisibleTiles() {
+			if old, ok := m.tiles[tv.Position]; ok {
+				prev[tv.Position] = old.LastSeen
+			} else {
+				prev[tv.Position] = -1
+			}
 			m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick}
 		}
 	}
+	return prev
 }
 
 // All returns all MemoryTile entries currently remembered in memory.

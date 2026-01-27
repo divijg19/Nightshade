@@ -28,3 +28,15 @@ const CautionThreshold = 3
 // a hallucinated visible item injected into an agent's Observation.Visible.
 // See v0.0.7 spec: beliefs with Age > ParanoiaThreshold are hallucinated.
 const ParanoiaThreshold = 6
+
+const (
+	MaxEnergy = 100
+	MinEnergy = 0
+
+	MoveEnergyCost    = 1
+	ObserveEnergyCost = 3
+	WaitEnergyRestore = 2
+
+	LowEnergyThreshold      = 30
+	CriticalEnergyThreshold = 10
+)

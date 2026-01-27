@@ -29,6 +29,12 @@ func main() {
 			// Debug: 'sees' is current visibility, 'believes' is agent memory
 			fmt.Printf("Agent A sees %d tiles: %+v\n", len(snap.Visible), snap.Visible)
 			if s, ok := a1.(*agent.Scripted); ok {
+
+				// Show energy state for debug
+				fmt.Printf("Agent A energy=%d\n", s.Energy())
+				if s.Energy() < agent.CriticalEnergyThreshold {
+					fmt.Printf("Agent A in critical energy state: override actions to WAIT\n")
+				}
 				fmt.Printf("Agent A sees %d tiles, believes %d tiles\n", len(snap.Visible), s.Memory().Count())
 
 				// Debug: detect hallucinations deterministically from memory drift.
