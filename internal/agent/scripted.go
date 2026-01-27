@@ -20,6 +20,44 @@ func computeTarget(pos core.Position, a Action) (core.Position, bool) {
 	}
 }
 
+// buildObservation constructs an Observation from the given memory and
+// runtime snapshot. It injects hallucinated tiles from memory when a
+// MemoryTile's Age > ParanoiaThreshold. Hallucinated tiles come only from
+// memory and are not used to update memory.
+func buildObservation(mem *Memory, snapshot interface{}) Observation {
+	var vis []core.TileView
+	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
+		vis = v.VisibleTiles()
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+
+	// Build Known beliefs from memory: compute Age = obs.Tick - LastSeen
+	known := []Belief{}
+	visMap := make(map[core.Position]struct{})
+	for _, vv := range vis {
+		visMap[vv.Position] = struct{}{}
+	}
+	if mem != nil {
+		for _, mt := range mem.All() {
+			age := tick - mt.LastSeen
+			known = append(known, Belief{Tile: mt.Tile, Age: age})
+			// If belief is older than ParanoiaThreshold and not currently
+			// visible truth, inject as hallucinated visible.
+			if age > ParanoiaThreshold {
+				if _, ok := visMap[mt.Tile.Position]; !ok {
+					vis = append(vis, mt.Tile)
+					visMap[mt.Tile.Position] = struct{}{}
+				}
+			}
+		}
+	}
+
+	return Observation{Visible: vis, Known: known, Tick: tick}
+}
+
 type Scripted struct {
 	id     string
 	memory *Memory
@@ -41,27 +79,8 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		s.memory.UpdateFromVisible(snapshot)
 	}
 
-	// Build an agent-side Observation (belief = memory.All()). Agents may
-	// start to act on Observation in later steps; for now we ignore it.
-	var vis []core.TileView
-	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
-		vis = v.VisibleTiles()
-	}
-	tick := 0
-	if t, ok := snapshot.(interface{ TickValue() int }); ok {
-		tick = t.TickValue()
-	}
-	// Build Known beliefs from memory: compute Age = obs.Tick - LastSeen
-	known := []Belief{}
-	for _, mt := range s.memory.All() {
-		age := tick - mt.LastSeen
-		known = append(known, Belief{Tile: mt.Tile, Age: age})
-	}
-	obs := Observation{
-		Visible: vis,
-		Known:   known,
-		Tick:    tick,
-	}
+	// Build agent-side Observation using helper (includes hallucinations).
+	obs := buildObservation(s.memory, snapshot)
 
 	// Decision flow: compute intended action (existing behavior), then
 	// potentially override with OBSERVE if target belief is stale.
@@ -71,7 +90,7 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 	if posv, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
 		if tgt, ok2 := computeTarget(posv.PositionValue(), intended); ok2 {
 			if mt, found := s.memory.GetMemoryTile(tgt); found {
-				age := tick - mt.LastSeen
+				age := obs.Tick - mt.LastSeen
 				if age > CautionThreshold {
 					// Prefer to OBSERVE (refresh visible belief) instead of a blind WAIT.
 					// OBSERVE consumes one tick and refreshes memory from Visible (already done above).
@@ -112,25 +131,8 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 		o.memory.UpdateFromVisible(snapshot)
 	}
 
-	// Build agent-side Observation for future use; currently ignored.
-	var vis []core.TileView
-	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
-		vis = v.VisibleTiles()
-	}
-	tick := 0
-	if t, ok := snapshot.(interface{ TickValue() int }); ok {
-		tick = t.TickValue()
-	}
-	known := []Belief{}
-	for _, mt := range o.memory.All() {
-		age := tick - mt.LastSeen
-		known = append(known, Belief{Tile: mt.Tile, Age: age})
-	}
-	obs := Observation{
-		Visible: vis,
-		Known:   known,
-		Tick:    tick,
-	}
+	// Build agent-side Observation using helper (includes hallucinations).
+	obs := buildObservation(o.memory, snapshot)
 	_ = obs
 
 	// Decide using tick parity as before, then apply caution check.
@@ -147,7 +149,7 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 	if posv, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
 		if tgt, ok2 := computeTarget(posv.PositionValue(), intended); ok2 {
 			if mt, found := o.memory.GetMemoryTile(tgt); found {
-				age := tick - mt.LastSeen
+				age := obs.Tick - mt.LastSeen
 				if age > CautionThreshold {
 					// Prefer to OBSERVE to refresh belief instead of WAITing silently.
 					return OBSERVE
