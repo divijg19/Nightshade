@@ -31,6 +31,27 @@ func main() {
 			if s, ok := a1.(*agent.Scripted); ok {
 				fmt.Printf("Agent A sees %d tiles, believes %d tiles\n", len(snap.Visible), s.Memory().Count())
 
+				// Debug: detect hallucinations deterministically from memory drift.
+				// A tile is hallucinated if it was older than ParanoiaThreshold
+				// before this tick and is not currently in the runtime Visible list.
+				prevTick := snap.Tick - 1
+				for _, mt := range s.Memory().All() {
+					ageBefore := prevTick - mt.LastSeen
+					if ageBefore > agent.ParanoiaThreshold {
+						// confirm not currently visible truth
+						isVisible := false
+						for _, v := range snap.Visible {
+							if v.Position == mt.Tile.Position {
+								isVisible = true
+								break
+							}
+						}
+						if !isVisible {
+							fmt.Printf("Agent A hallucinating tile at (%d,%d), age=%d\n", mt.Tile.Position.X, mt.Tile.Position.Y, ageBefore)
+						}
+					}
+				}
+
 				// Debug: print authoritative marker position and agent belief
 				truth := rt.MarkerPosition()
 				believed := []core.Position{}
@@ -73,6 +94,24 @@ func main() {
 					if mt, ok := s.Memory().GetMemoryTile(vtv.Position); ok {
 						age := snap.Tick - mt.LastSeen
 						fmt.Printf("Tile (%d,%d) belief age reset to %d\n", vtv.Position.X, vtv.Position.Y, age)
+					}
+				}
+
+				// Report which hallucinations (if any) were cleared by this OBSERVE.
+				// A hallucination is considered cleared if it would have been
+				// classified as hallucinated just before this tick and is now in
+				// the runtime Visible list.
+				prevTick := snap.Tick - 1
+				for _, mt := range s.Memory().All() {
+					ageBefore := prevTick - mt.LastSeen
+					if ageBefore > agent.ParanoiaThreshold {
+						// if now visible truth, report it cleared
+						for _, v := range snap.Visible {
+							if v.Position == mt.Tile.Position {
+								fmt.Printf("Agent A OBSERVES → hallucination cleared at (%d,%d)\n", mt.Tile.Position.X, mt.Tile.Position.Y)
+								break
+							}
+						}
 					}
 				}
 			}

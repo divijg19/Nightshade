@@ -23,3 +23,8 @@ const (
 // CautionThreshold defines how many ticks since last observation make a
 // tile "risky". If Age > CautionThreshold agents will hesitate.
 const CautionThreshold = 3
+
+// ParanoiaThreshold defines how old a belief must be before it becomes
+// a hallucinated visible item injected into an agent's Observation.Visible.
+// See v0.0.7 spec: beliefs with Age > ParanoiaThreshold are hallucinated.
+const ParanoiaThreshold = 6
