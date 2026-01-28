@@ -40,3 +40,9 @@ const (
 	LowEnergyThreshold      = 30
 	CriticalEnergyThreshold = 10
 )
+
+// Contagion constants
+const (
+	BeliefRadius    = 1
+	TransferPenalty = 2
+)
