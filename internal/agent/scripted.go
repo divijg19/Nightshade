@@ -2,6 +2,73 @@ package agent
 
 import "github.com/divijg19/Nightshade/internal/core"
 
+// BeliefSignal is an agent-local emission used for contagion among agents
+// within a tick. It is stored in a package-level registry keyed by agent
+// ID and is replaced each tick.
+type BeliefSignal struct {
+	Position core.Position
+	Beliefs  []Belief
+}
+
+var beliefSignals = map[string]BeliefSignal{}
+var beliefSignalsTick = -1
+
+func manhattan(a, b core.Position) int {
+	dx := a.X - b.X
+	if dx < 0 { dx = -dx }
+	dy := a.Y - b.Y
+	if dy < 0 { dy = -dy }
+	return dx + dy
+}
+
+// emitBeliefSignal stores this agent's belief signal for the current tick.
+func emitBeliefSignal(id string, tick int, pos core.Position, beliefs []Belief) {
+	if beliefSignalsTick != tick {
+		beliefSignals = map[string]BeliefSignal{}
+		beliefSignalsTick = tick
+	}
+	beliefSignals[id] = BeliefSignal{Position: pos, Beliefs: beliefs}
+}
+
+// applyBeliefContagion applies signals emitted by other agents to the
+// receiver's memory according to the contagion rules. Returns a list of
+// positions that were transferred (for debug/tests).
+func applyBeliefContagion(receiverID string, receiverPos core.Position, tick int, receiverMem *Memory, receiverEnergy int) []core.Position {
+	applied := []core.Position{}
+	for senderID, sig := range beliefSignals {
+		if senderID == receiverID { continue }
+		if manhattan(sig.Position, receiverPos) > BeliefRadius { continue }
+		for _, b := range sig.Beliefs {
+			pos := b.Tile.Position
+			// Determine sender's LastSeen from its belief Age: senderLastSeen = tick - b.Age
+			senderLastSeen := tick - b.Age
+			// Receiver's current belief
+			if receiverMem == nil { continue }
+			if cur, ok := receiverMem.GetMemoryTile(pos); ok {
+				receiverLastSeen := cur.LastSeen
+				// Eligibility: receiver does not have a newer belief OR low energy
+				if !(receiverLastSeen < senderLastSeen || receiverEnergy < LowEnergyThreshold) {
+					continue
+				}
+				// Asymmetric dominance: compare strengths
+				ageA := tick - senderLastSeen
+				ageB := tick - receiverLastSeen
+				strengthA := ParanoiaThreshold - ageA
+				strengthB := ParanoiaThreshold - ageB
+				if strengthA <= 0 { strengthA = 0 }
+				if strengthB <= 0 { strengthB = 0 }
+				if strengthA <= strengthB { continue }
+			} else {
+				// No current belief: eligible
+			}
+			// Apply transfer: insert into receiver memory with weakened LastSeen
+			receiverMem.tiles[pos] = MemoryTile{Tile: b.Tile, LastSeen: tick - TransferPenalty}
+			applied = append(applied, pos)
+		}
+	}
+	return applied
+}
+
 // computeTarget returns the target position for a MOVE action relative to
 // the current position. The second return value is false when the action is
 // not a movement action.
@@ -102,6 +169,29 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		prev = s.memory.UpdateFromVisible(snapshot)
 	}
 
+	// Emit belief signal derived from memory (known beliefs) for contagion.
+	pos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		pos = p.PositionValue()
+	}
+	beliefs := []Belief{}
+	for _, mt := range s.memory.All() {
+		age := 0
+		if t, ok := snapshot.(interface{ TickValue() int }); ok {
+			age = t.TickValue() - mt.LastSeen
+		}
+		beliefs = append(beliefs, Belief{Tile: mt.Tile, Age: age})
+	}
+	// Use snapshot tick for registry
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	emitBeliefSignal(s.id, tick, pos, beliefs)
+
+	// Apply contagion from earlier emitters in this tick (asymmetric)
+	_ = applyBeliefContagion(s.id, pos, tick, s.memory, s.energy)
+
 	// Compute effective thresholds based on energy
 	effectiveParanoia := ParanoiaThreshold
 	effectiveCaution := CautionThreshold
@@ -189,6 +279,26 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 	if o.memory != nil {
 		prev = o.memory.UpdateFromVisible(snapshot)
 	}
+
+	// Emit belief signal for contagion
+	opos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		opos = p.PositionValue()
+	}
+	obeliefs := []Belief{}
+	for _, mt := range o.memory.All() {
+		age := 0
+		if t, ok := snapshot.(interface{ TickValue() int }); ok {
+			age = t.TickValue() - mt.LastSeen
+		}
+		obeliefs = append(obeliefs, Belief{Tile: mt.Tile, Age: age})
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	emitBeliefSignal(o.id, tick, opos, obeliefs)
+	_ = applyBeliefContagion(o.id, opos, tick, o.memory, o.energy)
 
 	effectiveParanoia := ParanoiaThreshold
 	effectiveCaution := CautionThreshold
