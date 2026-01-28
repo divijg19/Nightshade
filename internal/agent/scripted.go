@@ -15,9 +15,13 @@ var beliefSignalsTick = -1
 
 func manhattan(a, b core.Position) int {
 	dx := a.X - b.X
-	if dx < 0 { dx = -dx }
+	if dx < 0 {
+		dx = -dx
+	}
 	dy := a.Y - b.Y
-	if dy < 0 { dy = -dy }
+	if dy < 0 {
+		dy = -dy
+	}
 	return dx + dy
 }
 
@@ -36,37 +40,92 @@ func emitBeliefSignal(id string, tick int, pos core.Position, beliefs []Belief) 
 func applyBeliefContagion(receiverID string, receiverPos core.Position, tick int, receiverMem *Memory, receiverEnergy int) []core.Position {
 	applied := []core.Position{}
 	for senderID, sig := range beliefSignals {
-		if senderID == receiverID { continue }
-		if manhattan(sig.Position, receiverPos) > BeliefRadius { continue }
+		if senderID == receiverID {
+			continue
+		}
+		if manhattan(sig.Position, receiverPos) > BeliefRadius {
+			continue
+		}
 		for _, b := range sig.Beliefs {
 			pos := b.Tile.Position
 			// Determine sender's LastSeen from its belief Age: senderLastSeen = tick - b.Age
 			senderLastSeen := tick - b.Age
 			// Receiver's current belief
-			if receiverMem == nil { continue }
+			if receiverMem == nil {
+				continue
+			}
 			if cur, ok := receiverMem.GetMemoryTile(pos); ok {
 				receiverLastSeen := cur.LastSeen
 				// Eligibility: receiver does not have a newer belief OR low energy
 				if !(receiverLastSeen < senderLastSeen || receiverEnergy < LowEnergyThreshold) {
 					continue
 				}
-				// Asymmetric dominance: compare strengths
+				// Asymmetric dominance: compare strengths using ScarLevel
 				ageA := tick - senderLastSeen
 				ageB := tick - receiverLastSeen
 				strengthA := ParanoiaThreshold - ageA
 				strengthB := ParanoiaThreshold - ageB
-				if strengthA <= 0 { strengthA = 0 }
-				if strengthB <= 0 { strengthB = 0 }
-				if strengthA <= strengthB { continue }
-			} else {
-				// No current belief: eligible
+				if strengthA < 0 {
+					strengthA = 0
+				}
+				if strengthB < 0 {
+					strengthB = 0
+				}
+				// include scar levels
+				strengthA += b.ScarLevel
+				strengthB += cur.ScarLevel
+				if strengthA <= strengthB {
+					continue
+				}
 			}
 			// Apply transfer: insert into receiver memory with weakened LastSeen
-			receiverMem.tiles[pos] = MemoryTile{Tile: b.Tile, LastSeen: tick - TransferPenalty}
+			// Preserve existing ScarLevel if present
+			scar := 0
+			if cur, ok := receiverMem.GetMemoryTile(pos); ok {
+				scar = cur.ScarLevel
+			}
+			receiverMem.tiles[pos] = MemoryTile{Tile: b.Tile, LastSeen: tick - TransferPenalty, ScarLevel: scar}
 			applied = append(applied, pos)
 		}
 	}
 	return applied
+}
+
+// detectAndApplyConflicts examines memory changes (prev map returned by
+// UpdateFromVisible) and current memory to find conflicting beliefs and
+// applies scars deterministically when conflict strength thresholds are met.
+func detectAndApplyConflicts(mem *Memory, prev map[core.Position]MemoryTile, tick int) {
+	if mem == nil {
+		return
+	}
+	for pos, newMt := range mem.tiles {
+		if oldMt, ok := prev[pos]; ok {
+			if oldMt.Tile.Glyph != newMt.Tile.Glyph {
+				// compute ages
+				ageOld := tick - oldMt.LastSeen
+				ageNew := tick - newMt.LastSeen
+				strOld := ParanoiaThreshold - ageOld
+				strNew := ParanoiaThreshold - ageNew
+				if strOld < 0 {
+					strOld = 0
+				}
+				if strNew < 0 {
+					strNew = 0
+				}
+				strOld += oldMt.ScarLevel
+				strNew += newMt.ScarLevel
+				if strOld >= ConflictThreshold && strNew >= ConflictThreshold {
+					// Apply scar to the current memory entry
+					nm := mem.tiles[pos]
+					nm.ScarLevel += 1
+					if nm.LastSeen < tick-ScarPenalty {
+						nm.LastSeen = tick - ScarPenalty
+					}
+					mem.tiles[pos] = nm
+				}
+			}
+		}
+	}
 }
 
 // computeTarget returns the target position for a MOVE action relative to
@@ -96,7 +155,7 @@ func computeTarget(pos core.Position, a Action) (core.Position, bool) {
 // MemoryTile's Age > effectiveParanoia. If prevLastSeen is provided it
 // is used to preserve hallucination state across an UpdateFromVisible
 // (useful when energy is critical and OBSERVE should not clear hallucinations).
-func buildObservation(mem *Memory, snapshot interface{}, prevLastSeen map[core.Position]int, energy int, effectiveParanoia int) Observation {
+func buildObservation(mem *Memory, snapshot interface{}, prevLastSeen map[core.Position]MemoryTile, energy int, effectiveParanoia int) Observation {
 	var vis []core.TileView
 	if v, ok := snapshot.(interface{ VisibleTiles() []core.TileView }); ok {
 		vis = v.VisibleTiles()
@@ -115,19 +174,25 @@ func buildObservation(mem *Memory, snapshot interface{}, prevLastSeen map[core.P
 	if mem != nil {
 		for _, mt := range mem.All() {
 			age := tick - mt.LastSeen
-			known = append(known, Belief{Tile: mt.Tile, Age: age})
+			known = append(known, Belief{Tile: mt.Tile, Age: age, ScarLevel: mt.ScarLevel})
 
-			// Determine whether to inject a hallucination. Normally we
-			// inject when current age > effectiveParanoia. However, when
-			// energy is critical, OBSERVE may have just updated LastSeen;
-			// use prevLastSeen to decide if the belief was hallucinated
-			// before the update and should remain injected.
+			// Determine per-tile effective paranoia considering scars and energy.
+			// Use the caller-provided `effectiveParanoia` as the base threshold
+			// (it already accounts for agent energy), then adjust by scar level.
+			perTileParanoia := effectiveParanoia - mt.ScarLevel
+			if energy < LowEnergyThreshold {
+				perTileParanoia -= 2
+			}
+
 			inject := false
-			if age > effectiveParanoia {
+			if age > perTileParanoia {
 				inject = true
 			} else if energy < CriticalEnergyThreshold {
-				if p, ok := prevLastSeen[mt.Tile.Position]; ok && p >= 0 {
-					if (tick - p) > effectiveParanoia {
+				if pmt, ok := prevLastSeen[mt.Tile.Position]; ok {
+					// prevLastSeen stores previous MemoryTile; use its LastSeen
+					// to determine whether hallucination should be preserved
+					// under critical energy.
+					if (tick - pmt.LastSeen) > perTileParanoia {
 						inject = true
 					}
 				}
@@ -163,8 +228,9 @@ func (s *Scripted) ID() string {
 }
 
 func (s *Scripted) Decide(snapshot Snapshot) Action {
-	// Update memory only from what is currently visible and capture previous LastSeen map.
-	var prev map[core.Position]int
+	// Update memory only from what is currently visible and capture previous
+	// MemoryTile map (contains previous LastSeen and Tile when present).
+	var prev map[core.Position]MemoryTile
 	if s.memory != nil {
 		prev = s.memory.UpdateFromVisible(snapshot)
 	}
@@ -191,6 +257,9 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 
 	// Apply contagion from earlier emitters in this tick (asymmetric)
 	_ = applyBeliefContagion(s.id, pos, tick, s.memory, s.energy)
+
+	// After contagion, detect conflicts and apply scars deterministically.
+	detectAndApplyConflicts(s.memory, prev, tick)
 
 	// Compute effective thresholds based on energy
 	effectiveParanoia := ParanoiaThreshold
@@ -243,6 +312,20 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		s.energy = MinEnergy
 	}
 
+	// OBSERVE healing: reduce ScarLevel by 1 for scarred memories when agent
+	// successfully performs OBSERVE (partial healing per tick).
+	if final == OBSERVE && s.memory != nil {
+		for pos, mt := range s.memory.tiles {
+			if mt.ScarLevel > 0 {
+				mt.ScarLevel -= 1
+				if mt.ScarLevel < 0 {
+					mt.ScarLevel = 0
+				}
+				s.memory.tiles[pos] = mt
+			}
+		}
+	}
+
 	_ = obs
 	return final
 }
@@ -274,8 +357,9 @@ func (o *Oscillating) ID() string {
 }
 
 func (o *Oscillating) Decide(snapshot Snapshot) Action {
-	// Update memory from visible tiles only and capture previous LastSeen
-	var prev map[core.Position]int
+	// Update memory from visible tiles only and capture previous MemoryTile
+	// map (contains previous LastSeen and Tile when present).
+	var prev map[core.Position]MemoryTile
 	if o.memory != nil {
 		prev = o.memory.UpdateFromVisible(snapshot)
 	}
@@ -300,6 +384,9 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 	emitBeliefSignal(o.id, tick, opos, obeliefs)
 	_ = applyBeliefContagion(o.id, opos, tick, o.memory, o.energy)
 
+	// After contagion, detect conflicts and apply scars deterministically.
+	detectAndApplyConflicts(o.memory, prev, tick)
+
 	effectiveParanoia := ParanoiaThreshold
 	effectiveCaution := CautionThreshold
 	if o.energy < LowEnergyThreshold {
@@ -320,7 +407,6 @@ func (o *Oscillating) Decide(snapshot Snapshot) Action {
 			intended = MOVE_S
 		}
 	}
-
 
 	// If intended is a move, compute target from agent position and check age.
 	if posv, ok := snapshot.(interface{ PositionValue() core.Position }); ok {

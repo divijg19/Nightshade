@@ -50,7 +50,7 @@ func TestLowEnergyAcceleratesParanoia(t *testing.T) {
 	s.energy = LowEnergyThreshold - 1
 	// Build observation directly
 	posSnap := fakeSnapPos{pos: core.Position{X: 0, Y: 0}, tick: tick}
-	prev := make(map[core.Position]int)
+	prev := make(map[core.Position]MemoryTile)
 	obs := buildObservation(mem, posSnap, prev, s.energy, ParanoiaThreshold-2)
 	found := false
 	for _, v := range obs.Visible {
@@ -114,7 +114,7 @@ func TestRecoveryViaWaitRestoresCognition(t *testing.T) {
 
 	// critical energy first -> hallucinate
 	s.energy = CriticalEnergyThreshold - 1
-	prev := make(map[core.Position]int)
+	prev := make(map[core.Position]MemoryTile)
 	posSnap := fakeSnapPos{pos: core.Position{X: 0, Y: 0}, tick: tick}
 	obs1 := buildObservation(mem, posSnap, prev, s.energy, ParanoiaThreshold)
 	found1 := false
