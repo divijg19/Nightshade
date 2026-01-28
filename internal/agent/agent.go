@@ -46,3 +46,9 @@ const (
 	BeliefRadius    = 1
 	TransferPenalty = 2
 )
+
+// Conflict / scar constants
+const (
+	ConflictThreshold = 3
+	ScarPenalty = 2
+)

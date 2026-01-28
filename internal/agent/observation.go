@@ -6,6 +6,9 @@ import "github.com/divijg19/Nightshade/internal/core"
 type Belief struct {
 	Tile core.TileView
 	Age  int
+
+	// ScarLevel indicates accumulated cognitive scarring for this belief.
+	ScarLevel int
 }
 
 // Observation is the agent-side interpretation of a runtime Snapshot.
