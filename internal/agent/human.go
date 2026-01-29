@@ -129,15 +129,37 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	fmt.Printf("Scars: %d\n", sumScars)
 	fmt.Printf("Beliefs: %d\n", h.memory.Count())
 
-	// 8. Read human input
+	// 8. Read human input (support INTROSPECT 'i' as a read-only, non-advancing affordance)
 	input := ""
-	if HumanInput != nil {
-		in, err := HumanInput()
-		if err == nil { input = strings.TrimSpace(in) }
+	for {
+		if HumanInput != nil {
+			in, err := HumanInput()
+			if err == nil { input = strings.TrimSpace(in) }
+		}
+		if input == "q" { os.Exit(0) }
+		if input == "i" {
+			// INTROSPECT: render introspection report (read-only) and loop to read input again.
+			// Do not mutate memory, energy, or advance time here.
+			rpt := Introspect(*h.memory, obs.Tick)
+			fmt.Println("You pause and examine your thoughts.")
+			fmt.Printf("\nBeliefs held: %d\n", rpt.TotalBeliefs)
+			fmt.Printf("Certain: %d\n", rpt.Certain)
+			fmt.Printf("Recent: %d\n", rpt.Recent)
+			fmt.Printf("Fading: %d\n", rpt.Fading)
+			fmt.Printf("Doubtful: %d\n", rpt.Doubtful)
+			if rpt.HasScars {
+				fmt.Println("\nSome memories feel unreliable.")
+			} else {
+				fmt.Println("\nYour thoughts feel settled.")
+			}
+			// After rendering introspection, continue loop to read next input.
+			input = ""
+			continue
+		}
+		break
 	}
 
 	// 9. Translate to intended Action
-	if input == "q" { os.Exit(0) }
 	intended := keyToAction(input)
 
 	// 10. Apply caution override
