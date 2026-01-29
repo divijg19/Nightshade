@@ -107,9 +107,23 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 		fmt.Println(line)
 	}
 
-	// 7. Render cognitive HUD
+	// 6. Render cognitive HUD and perceptual narration (use perception.Describe)
 	sumScars := 0
 	for _, mt := range h.memory.All() { sumScars += mt.ScarLevel }
+	st := ReadOnlyAgentState{
+		Energy: h.energy,
+		EffectiveParanoia: effectiveParanoia,
+		EffectiveCaution: effectiveCaution,
+		SumScars: sumScars,
+		BeliefCount: h.memory.Count(),
+		Position: center,
+		Tick: obs.Tick,
+	}
+	// Describe returns short deterministic sentences; print them instead of raw tiles
+	for _, line := range Describe(obs, st) {
+		fmt.Println(line)
+	}
+	// Also print minimal HUD (numbers preserved as before)
 	fmt.Printf("Energy: %d/%d\n", h.energy, MaxEnergy)
 	fmt.Printf("Paranoia: %d\n", effectiveParanoia)
 	fmt.Printf("Scars: %d\n", sumScars)
