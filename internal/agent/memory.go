@@ -93,3 +93,24 @@ func (m *Memory) GetMemoryTile(pos core.Position) (MemoryTile, bool) {
 	mt, ok := m.tiles[pos]
 	return mt, ok
 }
+
+// SetMemoryTile inserts or replaces a MemoryTile at position `pos`.
+// This is used by server-side rehydration code to restore persisted memory.
+func (m *Memory) SetMemoryTile(pos core.Position, mt MemoryTile) {
+	if m == nil {
+		return
+	}
+	if m.tiles == nil {
+		m.tiles = make(map[core.Position]MemoryTile)
+	}
+	m.tiles[pos] = mt
+}
+
+// ReplaceAll replaces the backing tile map with the provided one. Useful
+// for atomic rehydration from persistence.
+func (m *Memory) ReplaceAll(tiles map[core.Position]MemoryTile) {
+	if m == nil {
+		return
+	}
+	m.tiles = tiles
+}
