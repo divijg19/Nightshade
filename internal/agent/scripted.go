@@ -34,6 +34,16 @@ func emitBeliefSignal(id string, tick int, pos core.Position, beliefs []Belief) 
 	beliefSignals[id] = BeliefSignal{Position: pos, Beliefs: beliefs}
 }
 
+// GetBeliefSignals returns a copy of the current beliefSignals map. This is
+// a test/debug helper used by integration tests to inspect emitted signals.
+func GetBeliefSignals() map[string]BeliefSignal {
+	out := make(map[string]BeliefSignal)
+	for k, v := range beliefSignals {
+		out[k] = v
+	}
+	return out
+}
+
 // applyBeliefContagion applies signals emitted by other agents to the
 // receiver's memory according to the contagion rules. Returns a list of
 // positions that were transferred (for debug/tests).
@@ -253,6 +263,9 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 	if t, ok := snapshot.(interface{ TickValue() int }); ok {
 		tick = t.TickValue()
 	}
+	// emitBeliefSignal is kept here for compatibility, but the runtime also
+	// performs an emission pass calling EmitBeliefs on all agents before
+	// applying contagion to ensure simultaneous signals.
 	emitBeliefSignal(s.id, tick, pos, beliefs)
 
 	// Apply contagion from earlier emitters in this tick (asymmetric)
@@ -333,6 +346,29 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 // Memory exposes the agent's memory for external inspection in tools/tests.
 func (s *Scripted) Memory() *Memory {
 	return s.memory
+}
+
+// EmitBeliefs emits this scripted agent's BeliefSignal without applying
+// contagion. The runtime will call this for all agents before decision
+// resolution to ensure simultaneous emission semantics.
+func (s *Scripted) EmitBeliefs(snapshot Snapshot) {
+	pos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		pos = p.PositionValue()
+	}
+	beliefs := []Belief{}
+	for _, mt := range s.memory.All() {
+		age := 0
+		if t, ok := snapshot.(interface{ TickValue() int }); ok {
+			age = t.TickValue() - mt.LastSeen
+		}
+		beliefs = append(beliefs, Belief{Tile: mt.Tile, Age: age})
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	emitBeliefSignal(s.id, tick, pos, beliefs)
 }
 
 // Energy returns the current energy level for debug/inspection.
@@ -451,3 +487,26 @@ func (o *Oscillating) Memory() *Memory {
 
 // Energy returns the current energy level for debug/inspection.
 func (o *Oscillating) Energy() int { return o.energy }
+
+// EmitBeliefs emits this oscillating agent's BeliefSignal without applying
+// contagion. Runtime will call this in the emission pass prior to decision
+// resolution.
+func (o *Oscillating) EmitBeliefs(snapshot Snapshot) {
+	opos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		opos = p.PositionValue()
+	}
+	obeliefs := []Belief{}
+	for _, mt := range o.memory.All() {
+		age := 0
+		if t, ok := snapshot.(interface{ TickValue() int }); ok {
+			age = t.TickValue() - mt.LastSeen
+		}
+		obeliefs = append(obeliefs, Belief{Tile: mt.Tile, Age: age})
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	emitBeliefSignal(o.id, tick, opos, obeliefs)
+}
