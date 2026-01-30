@@ -88,6 +88,9 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	if t, ok := snapshot.(interface{ TickValue() int }); ok {
 		tick = t.TickValue()
 	}
+	// Runtime will call EmitBeliefs for all agents before contagion; keep
+	// the in-Decision emit as a fallback for cases where EmitBeliefs isn't
+	// invoked (backwards compatibility).
 	emitBeliefSignal(h.id, tick, pos, beliefs)
 
 	// 3. Apply contagion
@@ -298,4 +301,27 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	}
 
 	return final
+}
+
+// EmitBeliefs emits this human agent's BeliefSignal without applying
+// contagion. The runtime uses this in an emission pass prior to decision
+// resolution to guarantee simultaneous signals for contagion.
+func (h *Human) EmitBeliefs(snapshot Snapshot) {
+	pos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		pos = p.PositionValue()
+	}
+	beliefs := []Belief{}
+	for _, mt := range h.memory.All() {
+		age := 0
+		if t, ok := snapshot.(interface{ TickValue() int }); ok {
+			age = t.TickValue() - mt.LastSeen
+		}
+		beliefs = append(beliefs, Belief{Tile: mt.Tile, Age: age, ScarLevel: mt.ScarLevel})
+	}
+	tick := 0
+	if t, ok := snapshot.(interface{ TickValue() int }); ok {
+		tick = t.TickValue()
+	}
+	emitBeliefSignal(h.id, tick, pos, beliefs)
 }

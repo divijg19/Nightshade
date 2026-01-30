@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"time"
+
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/game"
@@ -14,15 +16,59 @@ func (r *Runtime) TickOnce() Decisions {
 
 	decisions := make(Decisions)
 
+	// 1. Observation phase: build snapshot for each agent and deliver to
+	//    RemoteHuman agents via their Observe/SendObservation channels.
+	snaps := make(map[string]Snapshot)
 	for _, a := range r.agents {
-		// 1. Pre-action observation
 		preSnap := r.snapshotFor(a, agent.Action(-1))
+		snaps[a.ID()] = preSnap
+		if rh, ok := a.(*agent.RemoteHuman); ok {
+			// Non-blocking notify the agent of the snapshot (agent will build
+			// its own Observation from Memory and Snapshot).
+			rh.Observe(preSnap)
+		}
+	}
 
-		// 2. Decide
-		action := a.Decide(preSnap)
+	// 2. Input phase: collect exactly one input per connected RemoteHuman.
+	//    We use a bounded timeout to avoid indefinite blocking.
+	inputs := make(map[string]string)
+	inputTimeout := 200 * time.Millisecond
+	for _, a := range r.agents {
+		if rh, ok := a.(*agent.RemoteHuman); ok {
+			// Attempt to read one input for this agent with timeout.
+			select {
+			case in := <-rh.RecvInput:
+				inputs[a.ID()] = in
+			case <-time.After(inputTimeout):
+				inputs[a.ID()] = ""
+			}
+		} else {
+			inputs[a.ID()] = ""
+		}
+	}
+
+	// 3. Decision phase: call Decide (or DecideWithInput for RemoteHuman)
+
+	// Emission pass: ask each agent to publish its BeliefSignal before any
+	// contagion is applied. Agents that implement EmitBeliefs will be called.
+	for _, a := range r.agents {
+		preSnap := snaps[a.ID()]
+		if emitter, ok := a.(interface{ EmitBeliefs(agent.Snapshot) }); ok {
+			emitter.EmitBeliefs(preSnap)
+		}
+	}
+
+	for _, a := range r.agents {
+		preSnap := snaps[a.ID()]
+		var action agent.Action
+		if rh, ok := a.(*agent.RemoteHuman); ok {
+			action = rh.DecideWithInput(preSnap, inputs[a.ID()])
+		} else {
+			action = a.Decide(preSnap)
+		}
 		decisions[a.ID()] = action
 
-		// 3. Apply movement
+		// 4. Resolution: apply movement results to world
 		pos, ok := r.world.PositionOf(a.ID())
 		if !ok {
 			continue
@@ -34,11 +80,9 @@ func (r *Runtime) TickOnce() Decisions {
 			r.world.Height(),
 		)
 		r.world.SetPosition(a.ID(), newPos)
-
-		// 4. Post-action observation (THIS WAS MISSING)
-		_ = r.snapshotFor(a, action)
 	}
 
+	// 5. Advance the runtime tick counter
 	r.advanceTick()
 	return decisions
 }
