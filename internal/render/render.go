@@ -29,7 +29,7 @@ func color(code string, s string) string { return esc + "[" + code + "m" + s + e
 
 // RenderTo draws the full-screen frame to the provided writer. It is
 // idempotent: each call emits a full-screen clear and redraw.
-func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scars int, prompt string) {
+func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scars int, prompt string, ephemeral string) {
 	// Clear and home
 	fmt.Fprint(w, clearScreen)
 	fmt.Fprint(w, cursorHome)
@@ -119,10 +119,18 @@ func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scar
 
 	fmt.Fprintln(w, "└────────────────────────────┘")
 
-	// Presence narration (kept minimal and non-identifying)
+	// NARRATION (0-2 lines) — keep nondisclosing and limited
 	if len(obs.Presence) > 0 {
 		fmt.Fprintln(w, "You sense presences nearby.")
 	} else {
+		fmt.Fprintln(w, "")
+	}
+
+	// Ephemeral single-line feedback (client-only). Appears below narration
+	if ephemeral != "" {
+		fmt.Fprintln(w, ephemeral)
+	} else {
+		// pad so layout is stable
 		fmt.Fprintln(w, "")
 	}
 
@@ -134,16 +142,16 @@ func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scar
 	}
 	fmt.Fprintf(w, "%s%s  Paranoia: %d  Scars: %d  Beliefs: %d\n", hudLabel, energyStr, paranoia, scars, len(obs.Known))
 
-	// Prompt
+	// Visual separator then prompt (cursor lands here)
+	fmt.Fprintln(w, "")
 	fmt.Fprint(w, "> ")
 	fmt.Fprint(w, prompt)
-	// ensure cursor ends at prompt
 	fmt.Fprint(w, showCursor)
 }
 
 // Helper used by tests to render with a short prompt
 func RenderForTest(obs agent.Observation) string {
 	var b strings.Builder
-	RenderTo(&b, obs, 100, 3, 0, "")
+	RenderTo(&b, obs, 100, 3, 0, "", "")
 	return b.String()
 }
