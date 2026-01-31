@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
+	"flag"
 	"log"
 	"net"
 	"os"
@@ -34,12 +36,12 @@ func defaultSocket() string {
 	return filepath.Join(persist.BaseDir(), "socket")
 }
 
-	func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, mu *sync.Mutex) {
+func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map[string]context.CancelFunc, mu *sync.Mutex) {
 	defer conn.Close()
 	// Read hello
 	var h helloMsg
 	if err := nnet.ReadFrame(conn, &h); err != nil {
-		log.Printf("hello read: %v", err)
+		log.Printf("invalid_frame agent=? err=%v", err)
 		return
 	}
 	// Validate that PublicKey is base64 and of correct length for ed25519
@@ -71,7 +73,9 @@ func defaultSocket() string {
 
 		// Load state.json (energy)
 		statePath := filepath.Join(agentDir, "state.json")
-		var st struct{ Energy int `json:"energy"` }
+		var st struct {
+			Energy int `json:"energy"`
+		}
 		if err := persist.ReadJSON(statePath, &st); err == nil {
 			energy = st.Energy
 		}
@@ -80,10 +84,10 @@ func defaultSocket() string {
 		memoryPath := filepath.Join(agentDir, "memory.json")
 		var raw struct {
 			Tiles []struct {
-				X int `json:"x"`
-				Y int `json:"y"`
-				Glyph int `json:"glyph"`
-				LastSeen int `json:"lastSeen"`
+				X         int `json:"x"`
+				Y         int `json:"y"`
+				Glyph     int `json:"glyph"`
+				LastSeen  int `json:"lastSeen"`
 				ScarLevel int `json:"scarLevel"`
 			} `json:"tiles"`
 		}
@@ -91,8 +95,8 @@ func defaultSocket() string {
 			for _, t := range raw.Tiles {
 				pos := core.Position{X: t.X, Y: t.Y}
 				mt := agent.MemoryTile{
-					Tile: core.TileView{Position: pos, Glyph: rune(t.Glyph), Visible: true},
-					LastSeen: t.LastSeen,
+					Tile:      core.TileView{Position: pos, Glyph: rune(t.Glyph), Visible: true},
+					LastSeen:  t.LastSeen,
 					ScarLevel: t.ScarLevel,
 				}
 				mem.SetMemoryTile(pos, mt)
@@ -104,21 +108,56 @@ func defaultSocket() string {
 		agents[agentID] = rh
 		mu.Unlock()
 	}
+	// Manage per-agent connection cancellation so reconnect replaces writers.
+	mu.Lock()
+	if cancels == nil {
+		cancels = map[string]context.CancelFunc{}
+	}
+	// If an existing connection exists, cancel it (reconnect semantics).
+	if cf, exists := cancels[agentID]; exists {
+		log.Printf("client_reconnected agent=%s", agentID)
+		cf()
+	} else {
+		log.Printf("client_connected agent=%s", agentID)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancels[agentID] = cancel
+	mu.Unlock()
 
-	// Start writer goroutine to push full observations to client
+	// Writer goroutine: forwards observations to this connection until ctx canceled.
 	go func() {
-		for obs := range rh.SendObservation {
-			out := map[string]interface{}{"type": "obs", "obs": obs, "energy": rh.Energy()}
-			// best-effort write
-			_ = nnet.WriteFrame(conn, out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case obs, ok := <-rh.SendObservation:
+				if !ok {
+					return
+				}
+				out := map[string]interface{}{"type": "obs", "obs": obs, "energy": rh.Energy()}
+				if err := nnet.WriteFrame(conn, out); err != nil {
+					// write error -> treat as disconnect
+					log.Printf("client_disconnected agent=%s reason=error", agentID)
+					cancel()
+					return
+				}
+			}
 		}
 	}()
 
-	// Start reader loop for inputs
+	// Reader loop for inputs
 	dec := bufio.NewReader(conn)
 	for {
 		var im inputMsg
 		if err := nnet.ReadFrame(dec, &im); err != nil {
+			// Connection read error -> disconnect
+			reason := "eof"
+			if !os.IsTimeout(err) {
+				reason = "invalid"
+			}
+			log.Printf("client_disconnected agent=%s reason=%s", agentID, reason)
+			// cancel writer
+			cancel()
 			return
 		}
 		if im.Type == "input" {
@@ -127,11 +166,17 @@ func defaultSocket() string {
 			case rh.RecvInput <- im.Key:
 			default:
 			}
+		} else {
+			// unknown frame type -> log and ignore
+			log.Printf("invalid_frame agent=%s err=unknown_type", agentID)
 		}
 	}
 }
 
 func main() {
+	dev := flag.Bool("dev", false, "enable dev mode: faster ticks, verbose logs")
+	flag.Parse()
+
 	socket := defaultSocket()
 	os.Remove(socket)
 	l, err := net.Listen("unix", socket)
@@ -142,6 +187,7 @@ func main() {
 	log.Printf("server listening on %s", socket)
 
 	agents := map[string]*agent.RemoteHuman{}
+	cancels := map[string]context.CancelFunc{}
 	var mu sync.Mutex
 	started := false
 	var rt *runtime.Runtime
@@ -155,7 +201,7 @@ func main() {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			go handleConn(c, agents, &mu)
+			go handleConn(c, agents, cancels, &mu)
 
 			// If runtime not started and we have at least one agent, start it.
 			mu.Lock()
@@ -171,9 +217,19 @@ func main() {
 				rt = runtime.New(list)
 				// Start tick loop honoring existing runtime.TickOnce
 				go func() {
+					var delay time.Duration = 200 * time.Millisecond
+					if *dev {
+						delay = 50 * time.Millisecond
+					}
 					for {
+						if *dev {
+							log.Printf("tick_start")
+						}
 						_ = rt.TickOnce()
-						time.Sleep(200 * time.Millisecond)
+						if *dev {
+							log.Printf("tick_end")
+						}
+						time.Sleep(delay)
 					}
 				}()
 			}
@@ -195,10 +251,10 @@ func main() {
 			if a.Memory() != nil {
 				for _, mt := range a.Memory().All() {
 					tiles = append(tiles, map[string]int{
-						"x": mt.Tile.Position.X,
-						"y": mt.Tile.Position.Y,
-						"glyph": int(mt.Tile.Glyph),
-						"lastSeen": mt.LastSeen,
+						"x":         mt.Tile.Position.X,
+						"y":         mt.Tile.Position.Y,
+						"glyph":     int(mt.Tile.Glyph),
+						"lastSeen":  mt.LastSeen,
 						"scarLevel": mt.ScarLevel,
 					})
 				}
