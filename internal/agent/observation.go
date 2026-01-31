@@ -21,6 +21,23 @@ type Observation struct {
 	Tick    int
 	// Position is the agent's current world position (for centering view)
 	Position core.Position
-	// Presence contains ephemeral narration lines about nearby agents/NPCs
-	Presence []string
+	// Presence contains ephemeral positional cues about nearby agents/NPCs.
+	// These are belief-derived impressions only and must not expose runtime truth.
+	Presence []PresenceCue
+}
+
+// PresenceType enumerates the kinds of perceived presences.
+type PresenceType string
+
+const (
+	PresenceSelf      PresenceType = "Self"
+	PresenceHumanOther PresenceType = "HumanOther"
+	PresenceNPC       PresenceType = "NPC"
+)
+
+// PresenceCue is an ephemeral perception about another agent or self.
+// The Position is where the agent believes the presence is located (belief-derived).
+type PresenceCue struct {
+	Type     PresenceType     `json:"type"`
+	Position core.Position    `json:"position"`
 }

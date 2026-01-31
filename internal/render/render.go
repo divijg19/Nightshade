@@ -18,6 +18,12 @@ const (
 	showCursor  = esc + "[?25h"
 )
 
+const (
+	ANSIReset       = "\x1b[0m"
+	ANSIWhiteBright = "\x1b[97m"
+	ANSICyan        = "\x1b[36m"
+	ANSIGrayDim     = "\x1b[90m"
+)
 // minimal color helpers
 func color(code string, s string) string { return esc + "[" + code + "m" + s + esc + "[0m" }
 
@@ -39,14 +45,55 @@ func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scar
 	for _, v := range obs.Visible {
 		visMap[v.Position] = v.Glyph
 	}
+	// build presence map (position -> PresenceType) with priority
+	presenceMap := map[core.Position]string{}
+	for _, p := range obs.Presence {
+		// priority resolution: Self > HumanOther > NPC
+		cur, ok := presenceMap[p.Position]
+		if !ok {
+			presenceMap[p.Position] = string(p.Type)
+			continue
+		}
+		// promote if incoming has higher priority
+		// map priority numbers: Self=3, HumanOther=2, NPC=1
+		prio := func(t string) int {
+			switch t {
+			case string(agent.PresenceSelf):
+				return 3
+			case string(agent.PresenceHumanOther):
+				return 2
+			case string(agent.PresenceNPC):
+				return 1
+			default:
+				return 0
+			}
+		}
+		if prio(string(p.Type)) > prio(cur) {
+			presenceMap[p.Position] = string(p.Type)
+		}
+	}
 	for dy := -r; dy <= r; dy++ {
 		fmt.Fprint(w, "│")
 		for dx := -r; dx <= r; dx++ {
 			pos := core.Position{X: center.X + dx, Y: center.Y + dy}
 			if dx == 0 && dy == 0 {
 				// self always bright white
-				fmt.Fprint(w, color("1;37", "@"))
+				fmt.Fprint(w, ANSIWhiteBright+"@"+ANSIReset)
 				continue
+			}
+			// Presence overlay: if a presence cue exists here, draw it
+			if pt, ok := presenceMap[pos]; ok {
+				switch pt {
+				case string(agent.PresenceHumanOther):
+					fmt.Fprint(w, ANSICyan+"@"+ANSIReset)
+					continue
+				case string(agent.PresenceNPC):
+					fmt.Fprint(w, ANSIGrayDim+"@"+ANSIReset)
+					continue
+				case string(agent.PresenceSelf):
+					fmt.Fprint(w, ANSIWhiteBright+"@"+ANSIReset)
+					continue
+				}
 			}
 			if g, ok := visMap[pos]; ok {
 				// marker
@@ -72,12 +119,10 @@ func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scar
 
 	fmt.Fprintln(w, "└────────────────────────────┘")
 
-	// Presence narration
-	for _, p := range obs.Presence {
-		fmt.Fprintln(w, p)
-	}
-	if len(obs.Presence) == 0 {
-		// pad
+	// Presence narration (kept minimal and non-identifying)
+	if len(obs.Presence) > 0 {
+		fmt.Fprintln(w, "You sense presences nearby.")
+	} else {
 		fmt.Fprintln(w, "")
 	}
 

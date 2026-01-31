@@ -168,9 +168,9 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
         effectiveParanoia = ParanoiaThreshold - 2
     }
     obs := buildObservation(r.memory, snapshot, prev, r.energy, effectiveParanoia)
-    // Compute presence cues from belief signals (best-effort, non-leaky):
-    // if other agents have emitted belief signals within BeliefRadius,
-    // add an ephemeral narration line. Do not include identities or positions.
+    // Compute positional presence cues from belief signals (best-effort, non-leaky):
+    // if other agents have emitted belief signals within BeliefRadius, add an
+    // ephemeral PresenceCue. Do not include identities.
     sigs := GetBeliefSignals()
     for id, sig := range sigs {
         if id == r.id {
@@ -178,8 +178,9 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
         }
         // compute manhattan
         d := 0
+        var pos core.Position
         if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
-            pos := p.PositionValue()
+            pos = p.PositionValue()
             dx := sig.Position.X - pos.X
             if dx < 0 {
                 dx = -dx
@@ -191,7 +192,13 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
             d = dx + dy
         }
         if d <= BeliefRadius {
-            obs.Presence = append(obs.Presence, "You sense another presence nearby.")
+            // classify agent kinds heuristically by id prefix (server-side ids
+            // for NPCs use "npc-" prefixes). This is only for presentation.
+            ptype := PresenceHumanOther
+            if len(id) >= 4 && id[:4] == "npc-" {
+                ptype = PresenceNPC
+            }
+            obs.Presence = append(obs.Presence, PresenceCue{Type: ptype, Position: sig.Position})
         }
     }
     select {
