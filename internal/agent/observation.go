@@ -19,4 +19,8 @@ type Observation struct {
 	Visible []core.TileView
 	Known   []Belief
 	Tick    int
+	// Position is the agent's current world position (for centering view)
+	Position core.Position
+	// Presence contains ephemeral narration lines about nearby agents/NPCs
+	Presence []string
 }

@@ -168,6 +168,32 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
         effectiveParanoia = ParanoiaThreshold - 2
     }
     obs := buildObservation(r.memory, snapshot, prev, r.energy, effectiveParanoia)
+    // Compute presence cues from belief signals (best-effort, non-leaky):
+    // if other agents have emitted belief signals within BeliefRadius,
+    // add an ephemeral narration line. Do not include identities or positions.
+    sigs := GetBeliefSignals()
+    for id, sig := range sigs {
+        if id == r.id {
+            continue
+        }
+        // compute manhattan
+        d := 0
+        if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+            pos := p.PositionValue()
+            dx := sig.Position.X - pos.X
+            if dx < 0 {
+                dx = -dx
+            }
+            dy := sig.Position.Y - pos.Y
+            if dy < 0 {
+                dy = -dy
+            }
+            d = dx + dy
+        }
+        if d <= BeliefRadius {
+            obs.Presence = append(obs.Presence, "You sense another presence nearby.")
+        }
+    }
     select {
     case r.SendObservation <- obs:
     default:

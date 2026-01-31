@@ -2,15 +2,17 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
 
+	"github.com/divijg19/Nightshade/internal/agent"
 	nnet "github.com/divijg19/Nightshade/internal/net"
 	"github.com/divijg19/Nightshade/internal/persist"
+	"github.com/divijg19/Nightshade/internal/render"
 )
 
 type helloMsg struct {
@@ -52,15 +54,33 @@ func main() {
         log.Fatalf("hello write: %v", err)
     }
 
-    // Reader goroutine: print observations
+    // Reader goroutine: full-screen redraw per observation
     go func() {
         for {
-            var m map[string]interface{}
-            if err := nnet.ReadFrame(conn, &m); err != nil {
+            var frame map[string]interface{}
+            if err := nnet.ReadFrame(conn, &frame); err != nil {
                 return
             }
-            if m["type"] == "obs" {
-                fmt.Printf("Tick %v Visible: %v\n", m["tick"], m["visible"])
+            if frame["type"] == "obs" {
+                // Re-marshal the obs payload and unmarshal into agent.Observation
+                if obsPayload, ok := frame["obs"]; ok {
+                    b, err := json.Marshal(obsPayload)
+                    if err != nil {
+                        continue
+                    }
+                    var obs agent.Observation
+                    if err := json.Unmarshal(b, &obs); err != nil {
+                        continue
+                    }
+                    // Render (use energy from frame if present)
+                    energy := 100
+                    if e, ok := frame["energy"].(float64); ok {
+                        energy = int(e)
+                    }
+                    paranoia := 3
+                    scars := 0
+                    render.RenderTo(os.Stdout, obs, energy, paranoia, scars, "")
+                }
             }
         }
     }()

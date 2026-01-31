@@ -105,10 +105,10 @@ func defaultSocket() string {
 		mu.Unlock()
 	}
 
-	// Start writer goroutine to push observations to client
+	// Start writer goroutine to push full observations to client
 	go func() {
 		for obs := range rh.SendObservation {
-			out := map[string]interface{}{"type": "obs", "visible": obs.Visible, "tick": obs.Tick}
+			out := map[string]interface{}{"type": "obs", "obs": obs, "energy": rh.Energy()}
 			// best-effort write
 			_ = nnet.WriteFrame(conn, out)
 		}
