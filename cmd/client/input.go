@@ -29,6 +29,40 @@ func actionFromKey(r rune) (string, bool) {
 	}
 }
 
+func describeActionKey(r rune) (string, bool) {
+	switch r {
+	case 'w':
+		return "move north", true
+	case 'a':
+		return "move west", true
+	case 's':
+		return "move south", true
+	case 'd':
+		return "move east", true
+	case '.':
+		return "wait", true
+	case 'e':
+		return "observe", true
+	default:
+		return "", false
+	}
+}
+
+func movementDelta(r rune) (dx int, dy int, ok bool) {
+	switch r {
+	case 'w':
+		return 0, -1, true
+	case 'a':
+		return -1, 0, true
+	case 's':
+		return 0, 1, true
+	case 'd':
+		return 1, 0, true
+	default:
+		return 0, 0, false
+	}
+}
+
 func buildIntrospectionLine(obs agent.Observation) string {
 	var total, certain, recent, fading, doubtful int
 	hasScars := false

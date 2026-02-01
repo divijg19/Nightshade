@@ -179,19 +179,48 @@ Generated policies can then be loaded by the Go runtime.
 * Python 3.11+
 * `uv`
 
-### Build
+### Quickstart (Human Player)
+
+Run the server (authoritative runtime):
 
 ```bash
-go build ./cmd/nightshade
+go run ./cmd/server
 ```
 
-### Run
+In a second terminal, run the client (terminal UI):
 
 ```bash
-./nightshade
+go run ./cmd/client
 ```
 
-Players connect via terminal (TCP / WebSocket, depending on config).
+Optional: minimal UI framing
+
+```bash
+go run ./cmd/client --minimal
+```
+
+If you need a custom socket path:
+
+```bash
+NIGHTSHADE_SOCKET=/path/to/socket go run ./cmd/server
+go run ./cmd/client --socket /path/to/socket
+```
+
+### Controls
+
+These are single-key inputs (no Enter required):
+
+* `w/a/s/d` – move
+* `e` – observe
+* `.` (or Enter) – wait
+* `i` – introspect (UI-only)
+* `[` `]` – replay (UI-only)
+* `?` – help
+* `q` – quit
+
+### What This Feels Like (No Spoilers)
+
+Nightshade is a deterministic, terminal-native shared world. You move, pause, and observe—while the UI helps you stay oriented with replay and introspection. Nothing is hidden behind menus; if you’re unsure what to do, press `?`.
 
 ---
 
