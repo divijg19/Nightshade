@@ -217,7 +217,11 @@ func buildObservation(mem *Memory, snapshot interface{}, prevLastSeen map[core.P
 		}
 	}
 
-	return Observation{Visible: vis, Known: known, Tick: tick}
+	pos := core.Position{}
+	if p, ok := snapshot.(interface{ PositionValue() core.Position }); ok {
+		pos = p.PositionValue()
+	}
+	return Observation{Visible: vis, Known: known, Tick: tick, Position: pos, Presence: nil}
 }
 
 type Scripted struct {

@@ -18,13 +18,13 @@ import "github.com/divijg19/Nightshade/internal/core"
 
 // ReadOnlyAgentState is a minimal read-only view passed to Describe.
 type ReadOnlyAgentState struct {
-	Energy           int
+	Energy            int
 	EffectiveParanoia int
 	EffectiveCaution  int
-	SumScars         int
-	BeliefCount      int
-	Position         core.Position
-	Tick             int
+	SumScars          int
+	BeliefCount       int
+	Position          core.Position
+	Tick              int
 }
 
 // Describe translates an Observation and agent read-only state into
@@ -33,7 +33,9 @@ func Describe(ob Observation, st ReadOnlyAgentState) []string {
 	lines := []string{}
 	// helpers
 	visMap := map[core.Position]struct{}{}
-	for _, v := range ob.Visible { visMap[v.Position] = struct{}{} }
+	for _, v := range ob.Visible {
+		visMap[v.Position] = struct{}{}
+	}
 
 	// 1. Newly visible tiles: Known Age == 0
 	for _, k := range ob.Known {
@@ -86,9 +88,13 @@ func Describe(ob Observation, st ReadOnlyAgentState) []string {
 		dx := k.Tile.Position.X - st.Position.X
 		dy := k.Tile.Position.Y - st.Position.Y
 		manh := dx
-		if manh < 0 { manh = -manh }
+		if manh < 0 {
+			manh = -manh
+		}
 		ady := dy
-		if ady < 0 { ady = -ady }
+		if ady < 0 {
+			ady = -ady
+		}
 		if manh+ady == 1 {
 			if k.Age > st.EffectiveCaution {
 				foundStaleTarget = true
@@ -101,7 +107,11 @@ func Describe(ob Observation, st ReadOnlyAgentState) []string {
 	}
 
 	// Truncate to max 7 lines and return
-	if len(lines) > 7 { lines = lines[:7] }
-	if len(lines) == 0 { lines = append(lines, "You sense nothing unusual.") }
+	if len(lines) > 7 {
+		lines = lines[:7]
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "You sense nothing unusual.")
+	}
 	return lines
 }

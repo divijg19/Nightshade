@@ -5,8 +5,8 @@ import "github.com/divijg19/Nightshade/internal/core"
 // MemoryTile represents a remembered tile and the tick when it was last
 // observed. This type lives in the agent layer and imports only internal/core.
 type MemoryTile struct {
-	Tile     core.TileView
-	LastSeen int
+	Tile      core.TileView
+	LastSeen  int
 	ScarLevel int
 }
 

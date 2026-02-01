@@ -3,12 +3,12 @@ package agent
 // IntrospectionReport contains simple counts derived from Memory and tick.
 // All calculations are read-only and deterministic.
 type IntrospectionReport struct {
-	TotalBeliefs   int
-	Certain        int
-	Recent         int
-	Fading         int
-	Doubtful       int
-	HasScars       bool
+	TotalBeliefs int
+	Certain      int
+	Recent       int
+	Fading       int
+	Doubtful     int
+	HasScars     bool
 }
 
 // Introspect analyzes a Memory and currentTick and returns a report of

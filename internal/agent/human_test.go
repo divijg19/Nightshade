@@ -14,16 +14,20 @@ func makeInput(s string) func() (string, error) {
 // snapWithPos provides VisibleTiles, TickValue and PositionValue for tests
 // It relies on the package-level fakeSnap / fakeSnapPos types defined
 // in other test files in this package.
-type snapWithPos struct{ fakeSnap; pos core.Position }
-func (s snapWithPos) PositionValue() core.Position { return s.pos }
-func (s snapWithPos) TickValue() int { return s.tick }
+type snapWithPos struct {
+	fakeSnap
+	pos core.Position
+}
+
+func (s snapWithPos) PositionValue() core.Position  { return s.pos }
+func (s snapWithPos) TickValue() int                { return s.tick }
 func (s snapWithPos) VisibleTiles() []core.TileView { return s.tiles }
 
 func TestHumanInvalidInputWaits(t *testing.T) {
 	h := NewHuman("H1")
 	HumanInput = makeInput("x")
-	defer func(){ HumanInput = nil }()
-	snap := fakeSnapPos{pos: core.Position{X:0,Y:0}, tick: 10}
+	defer func() { HumanInput = nil }()
+	snap := fakeSnapPos{pos: core.Position{X: 0, Y: 0}, tick: 10}
 	act := h.Decide(snap)
 	if act != WAIT {
 		t.Fatalf("expected WAIT for invalid input, got %v", act)
@@ -38,7 +42,7 @@ func TestHumanObserveClearsScars(t *testing.T) {
 
 	// input OBSERVE
 	HumanInput = makeInput("e")
-	defer func(){ HumanInput = nil }()
+	defer func() { HumanInput = nil }()
 
 	// provide snapshot that does not include tilePos so UpdateFromVisible
 	// won't overwrite the scar; Decide should decrement it by 1.
@@ -65,24 +69,31 @@ func TestHumanHallucinatesUnderParanoia(t *testing.T) {
 	prev := make(map[core.Position]MemoryTile)
 	obs := buildObservation(mem, snap, prev, MaxEnergy, ParanoiaThreshold)
 	found := false
-	for _, v := range obs.Visible { if v.Position == target { found = true; break } }
-	if !found { t.Fatalf("expected hallucination present in Visible") }
+	for _, v := range obs.Visible {
+		if v.Position == target {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected hallucination present in Visible")
+	}
 }
 
 func TestHumanAffectedByBeliefContagion(t *testing.T) {
 	// Set up an emitter signal for this tick
 	tick := 50
-	senderPos := core.Position{X:0, Y:0}
-	tilePos := core.Position{X:1, Y:0}
+	senderPos := core.Position{X: 0, Y: 0}
+	tilePos := core.Position{X: 1, Y: 0}
 	emitBeliefSignal("S", tick, senderPos, []Belief{{Tile: core.TileView{Position: tilePos}, Age: 0}})
 
 	// human positioned at (0,0) should receive contagion when Decide runs
 	h := NewHuman("H4")
 	HumanInput = makeInput(".")
-	defer func(){ HumanInput = nil }()
+	defer func() { HumanInput = nil }()
 	snap := fakeSnap{tiles: []core.TileView{}, tick: tick}
 	// snapshot position must be near sender; use package-level snapWithPos
-	s := snapWithPos{fakeSnap: snap, pos: core.Position{X:0,Y:0}}
+	s := snapWithPos{fakeSnap: snap, pos: core.Position{X: 0, Y: 0}}
 	_ = h.Decide(s)
 	// after Decide, human memory should contain tilePos (transferred)
 	if _, ok := h.Memory().GetMemoryTile(tilePos); !ok {
