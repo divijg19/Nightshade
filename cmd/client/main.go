@@ -8,9 +8,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/core"
 	nnet "github.com/divijg19/Nightshade/internal/net"
 	"github.com/divijg19/Nightshade/internal/persist"
 	"github.com/divijg19/Nightshade/internal/render"
@@ -36,8 +38,10 @@ func defaultSocket() string {
 }
 
 func main() {
-	socket := defaultSocket()
+	socketFlag := flag.String("socket", defaultSocket(), "unix socket path (or set NIGHTSHADE_SOCKET)")
+	minimalFlag := flag.Bool("minimal", false, "use minimal UI framing")
 	flag.Parse()
+	socket := *socketFlag
 
 	// Terminal raw mode to suppress kernel echo and allow controlled prompt
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -56,15 +60,50 @@ func main() {
 	_ = pub
 
 	// Shared state for rendering/input
-	lastEnergy := 100
+	lastEnergy := 0
+	haveEnergy := false
 	lastParanoia := 3
 	lastScars := 0
 	var lastObs agent.Observation
 	var history []agent.Observation
 	replayCursor := 0
 	inReplay := false
+	showHelp := true
+
+	opts := render.Options{Minimal: *minimalFlag}
+
+	type pendingAction struct {
+		key     rune
+		desc    string
+		basePos core.Position
+	}
+	var pending *pendingAction
+	energyDeltaToShow := 0
 
 	stdin := bufio.NewReader(os.Stdin)
+
+	helpStatus := func() string {
+		return "Controls: w/a/s/d move  e observe  . wait\nMore: i introspect  [ ] replay  q quit  ? help"
+	}
+
+	promptHint := func() string {
+		if inReplay {
+			return "REPLAY  (? help)"
+		}
+		if showHelp {
+			return "(? hide help)"
+		}
+		return "(? help)"
+	}
+
+	renderNow := func(obs agent.Observation, status string, pulse bool) {
+		if pulse && strings.TrimSpace(status) != "" {
+			parts := strings.SplitN(status, "\n", 2)
+			parts[0] = "\x1b[7m" + parts[0] + "\x1b[0m"
+			status = strings.Join(parts, "\n")
+		}
+		render.RenderToWithOptions(os.Stdout, obs, lastEnergy, lastParanoia, lastScars, promptHint(), status, opts)
+	}
 
 	// (render helper removed — rendering is done synchronously per observation)
 
@@ -144,8 +183,17 @@ func main() {
 				continue
 			}
 			// render once
+			prevEnergy := lastEnergy
 			if e, ok := frame["energy"].(float64); ok {
 				lastEnergy = int(e)
+				if haveEnergy {
+					if prevEnergy != lastEnergy {
+						energyDeltaToShow = lastEnergy - prevEnergy
+					}
+				} else {
+					haveEnergy = true
+					energyDeltaToShow = 0
+				}
 			}
 			lastObs = obs
 			history = append(history, obs)
@@ -154,7 +202,50 @@ func main() {
 			}
 			replayCursor = len(history) - 1
 			inReplay = false
-			render.RenderTo(os.Stdout, obs, lastEnergy, lastParanoia, lastScars, "", "")
+
+			status := ""
+			if showHelp {
+				status = helpStatus()
+			} else if pending != nil {
+				// Resolve “move succeeded” only when the new observation confirms it.
+				resolved := "You " + pending.desc + "."
+				if pending.key == 'w' || pending.key == 'a' || pending.key == 's' || pending.key == 'd' {
+					dx := obs.Position.X - pending.basePos.X
+					dy := obs.Position.Y - pending.basePos.Y
+					if dx < 0 {
+						dx = -dx
+					}
+					if dy < 0 {
+						dy = -dy
+					}
+					// Success is “moved exactly one tile” regardless of axis conventions.
+					if dx+dy == 1 {
+						resolved = "You " + pending.desc + "."
+					} else {
+						// Intent-only feedback without asserting a new failure state.
+						resolved = "You try to " + pending.desc + "."
+					}
+				} else {
+					// Non-movement actions are always safe to acknowledge.
+					switch pending.key {
+					case '.':
+						resolved = "You wait."
+					case 'e':
+						resolved = "You observe carefully."
+					}
+				}
+				status = resolved
+				if energyDeltaToShow != 0 {
+					status = status + "\n" + fmt.Sprintf("Energy Δ %+d", energyDeltaToShow)
+					energyDeltaToShow = 0
+				}
+				pending = nil
+			} else if energyDeltaToShow != 0 {
+				// Keep the delta for the next acknowledged action, but don't spam.
+				energyDeltaToShow = 0
+			}
+
+			renderNow(obs, status, false)
 
 			// now block for one key input; DO NOT print or re-render on keystrokes.
 		inputLoop:
@@ -177,11 +268,20 @@ func main() {
 					continue
 				}
 
+				if key == '?' {
+					showHelp = !showHelp
+					status := ""
+					if showHelp {
+						status = helpStatus()
+					}
+					renderNow(lastObs, status, false)
+					continue
+				}
+
 				// client-only commands: introspect and replay navigation
 				switch key {
 				case 'i':
-					eph := buildIntrospectionLine(lastObs)
-					render.RenderTo(os.Stdout, lastObs, lastEnergy, lastParanoia, lastScars, "", eph)
+					renderNow(lastObs, buildIntrospectionLine(lastObs), false)
 					continue
 				case '[', ']':
 					if len(history) == 0 {
@@ -198,8 +298,8 @@ func main() {
 						}
 					}
 					replayObs := history[replayCursor]
-					eph := fmt.Sprintf("Replay tick %d (%d/%d)", replayObs.Tick, replayCursor+1, len(history))
-					render.RenderTo(os.Stdout, replayObs, lastEnergy, lastParanoia, lastScars, "", eph)
+					status := fmt.Sprintf("Replay tick %d (%d/%d)", replayObs.Tick, replayCursor+1, len(history))
+					renderNow(replayObs, status, false)
 					continue
 				}
 
@@ -207,14 +307,21 @@ func main() {
 				if inReplay {
 					inReplay = false
 					replayCursor = len(history) - 1
-					render.RenderTo(os.Stdout, lastObs, lastEnergy, lastParanoia, lastScars, "", "")
+					renderNow(lastObs, "", false)
 				}
 
 				if actionKey, ok := actionFromKey(key); ok {
+					if showHelp {
+						showHelp = false
+					}
+					desc, _ := describeActionKey(key)
+					pending = &pendingAction{key: key, desc: desc, basePos: lastObs.Position}
+					renderNow(lastObs, "→ "+desc, true)
 					_ = nnet.WriteFrame(conn, inputMsg{Type: "input", Key: actionKey})
 					break inputLoop
 				}
-				// ignore unknown keys and keep waiting for a valid action
+				// immediate rejection feedback for invalid keys (no tick)
+				renderNow(lastObs, fmt.Sprintf("Unknown key: %q  (? for help)", key), true)
 			}
 		}
 		// connection loop ended; close and reconnect

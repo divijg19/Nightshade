@@ -23,6 +23,12 @@ func TestRender_ClearsScreen(t *testing.T) {
 	if len(out) < 2 {
 		t.Fatalf("render output too small")
 	}
+	if !strings.HasPrefix(out, clearScreen+cursorHome) {
+		t.Fatalf("render output does not start with clear+home")
+	}
+	if !strings.Contains(out, "\r\n") {
+		t.Fatalf("render output missing CRLF line endings")
+	}
 }
 
 func TestPresenceRendering(t *testing.T) {
@@ -96,7 +102,7 @@ func TestRender_IdempotentAndLayout(t *testing.T) {
 	if !strings.Contains(out1, "WORLD") {
 		t.Fatalf("missing WORLD VIEW header")
 	}
-	if !strings.Contains(out1, "Energy:") {
+	if !strings.Contains(out1, "Energy") {
 		t.Fatalf("missing HUD Energy label")
 	}
 	if !strings.Contains(out1, "> ") {

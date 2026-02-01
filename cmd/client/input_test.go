@@ -49,6 +49,53 @@ func TestActionFromKey(t *testing.T) {
 	}
 }
 
+func TestDescribeActionKey(t *testing.T) {
+	for _, c := range []struct {
+		in   rune
+		want string
+		ok   bool
+	}{
+		{'w', "move north", true},
+		{'a', "move west", true},
+		{'s', "move south", true},
+		{'d', "move east", true},
+		{'.', "wait", true},
+		{'e', "observe", true},
+		{'?', "", false},
+	} {
+		got, ok := describeActionKey(c.in)
+		if ok != c.ok {
+			t.Fatalf("describeActionKey(%q) ok=%v want %v", c.in, ok, c.ok)
+		}
+		if got != c.want {
+			t.Fatalf("describeActionKey(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestMovementDelta(t *testing.T) {
+	for _, c := range []struct {
+		in     rune
+		dx, dy int
+		ok     bool
+	}{
+		{'w', 0, -1, true},
+		{'a', -1, 0, true},
+		{'s', 0, 1, true},
+		{'d', 1, 0, true},
+		{'.', 0, 0, false},
+		{'e', 0, 0, false},
+	} {
+		dx, dy, ok := movementDelta(c.in)
+		if ok != c.ok {
+			t.Fatalf("movementDelta(%q) ok=%v want %v", c.in, ok, c.ok)
+		}
+		if ok && (dx != c.dx || dy != c.dy) {
+			t.Fatalf("movementDelta(%q)=(%d,%d) want (%d,%d)", c.in, dx, dy, c.dx, c.dy)
+		}
+	}
+}
+
 func TestBuildIntrospectionLine(t *testing.T) {
 	obs := agent.Observation{
 		Known: []agent.Belief{
