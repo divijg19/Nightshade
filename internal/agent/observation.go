@@ -30,14 +30,14 @@ type Observation struct {
 type PresenceType string
 
 const (
-	PresenceSelf      PresenceType = "Self"
+	PresenceSelf       PresenceType = "Self"
 	PresenceHumanOther PresenceType = "HumanOther"
-	PresenceNPC       PresenceType = "NPC"
+	PresenceNPC        PresenceType = "NPC"
 )
 
 // PresenceCue is an ephemeral perception about another agent or self.
 // The Position is where the agent believes the presence is located (belief-derived).
 type PresenceCue struct {
-	Type     PresenceType     `json:"type"`
-	Position core.Position    `json:"position"`
+	Type     PresenceType  `json:"type"`
+	Position core.Position `json:"position"`
 }

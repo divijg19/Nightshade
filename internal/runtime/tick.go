@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"time"
-
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/game"
@@ -29,19 +27,15 @@ func (r *Runtime) TickOnce() Decisions {
 		}
 	}
 
-	// 2. Input phase: collect exactly one input per connected RemoteHuman.
-	//    We use a bounded timeout to avoid indefinite blocking.
+	// 2. Input phase: collect exactly one input per RemoteHuman.
+	//    Block until each RemoteHuman provides an input to enforce strict
+	//    turn-based semantics. This intentionally blocks the runtime until
+	//    clients respond (or tests provide the inputs programmatically).
 	inputs := make(map[string]string)
-	inputTimeout := 200 * time.Millisecond
 	for _, a := range r.agents {
 		if rh, ok := a.(*agent.RemoteHuman); ok {
-			// Attempt to read one input for this agent with timeout.
-			select {
-			case in := <-rh.RecvInput:
-				inputs[a.ID()] = in
-			case <-time.After(inputTimeout):
-				inputs[a.ID()] = ""
-			}
+			in := <-rh.RecvInput
+			inputs[a.ID()] = in
 		} else {
 			inputs[a.ID()] = ""
 		}

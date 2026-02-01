@@ -3,153 +3,237 @@ package render
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/core"
 )
 
-// ANSI control sequences
 const (
 	esc         = "\x1b"
 	clearScreen = esc + "[2J"
 	cursorHome  = esc + "[H"
-	hideCursor  = esc + "[?25l"
-	showCursor  = esc + "[?25h"
 )
 
 const (
 	ANSIReset       = "\x1b[0m"
 	ANSIWhiteBright = "\x1b[97m"
 	ANSICyan        = "\x1b[36m"
+	ANSIYellow      = "\x1b[33m"
 	ANSIGrayDim     = "\x1b[90m"
+	ANSIMagentaDim  = "\x1b[2;35m"
 )
-// minimal color helpers
+
 func color(code string, s string) string { return esc + "[" + code + "m" + s + esc + "[0m" }
 
-// RenderTo draws the full-screen frame to the provided writer. It is
-// idempotent: each call emits a full-screen clear and redraw.
-func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scars int, prompt string, ephemeral string) {
-	// Clear and home
-	fmt.Fprint(w, clearScreen)
-	fmt.Fprint(w, cursorHome)
-	fmt.Fprint(w, hideCursor)
+// Frame represents a full UI frame assembled in memory.
+type Frame struct {
+	Grid      []string
+	Narration []string
+	Ephemeral string
+	HUD       []string
+	Prompt    string
+}
 
-	// Box header
-	fmt.Fprintln(w, "┌──────── WORLD VIEW ────────┐")
+// RenderGrid returns fixed-size, colorized grid lines for the observation.
+// It does NOT perform any IO.
+func RenderGrid(obs agent.Observation) []string {
+	// viewport radius (produces 5x5 grid)
+	r := 2
+	size := 2*r + 1
 
-	// Render a fixed-size viewport (5x5) centered on obs.Position
-	r := 2 // radius
-	center := obs.Position
-	visMap := map[core.Position]rune{}
+	// Prepare maps for quick lookup
+	visMap := map[core.Position]core.TileView{}
 	for _, v := range obs.Visible {
-		visMap[v.Position] = v.Glyph
+		visMap[v.Position] = v
 	}
-	// build presence map (position -> PresenceType) with priority
-	presenceMap := map[core.Position]string{}
+	knownMap := map[core.Position]agent.Belief{}
+	for _, b := range obs.Known {
+		knownMap[b.Tile.Position] = b
+	}
+	presenceMap := map[core.Position]agent.PresenceType{}
 	for _, p := range obs.Presence {
-		// priority resolution: Self > HumanOther > NPC
 		cur, ok := presenceMap[p.Position]
 		if !ok {
-			presenceMap[p.Position] = string(p.Type)
+			presenceMap[p.Position] = p.Type
 			continue
 		}
-		// promote if incoming has higher priority
-		// map priority numbers: Self=3, HumanOther=2, NPC=1
-		prio := func(t string) int {
+		prio := func(t agent.PresenceType) int {
 			switch t {
-			case string(agent.PresenceSelf):
+			case agent.PresenceSelf:
 				return 3
-			case string(agent.PresenceHumanOther):
+			case agent.PresenceHumanOther:
 				return 2
-			case string(agent.PresenceNPC):
+			case agent.PresenceNPC:
 				return 1
 			default:
 				return 0
 			}
 		}
-		if prio(string(p.Type)) > prio(cur) {
-			presenceMap[p.Position] = string(p.Type)
+		if prio(p.Type) > prio(cur) {
+			presenceMap[p.Position] = p.Type
 		}
 	}
+
+	center := obs.Position
+	lines := make([]string, 0, size)
 	for dy := -r; dy <= r; dy++ {
-		fmt.Fprint(w, "│")
+		var row strings.Builder
 		for dx := -r; dx <= r; dx++ {
 			pos := core.Position{X: center.X + dx, Y: center.Y + dy}
+			// Default glyph
+			var cell string
+			// center = self
 			if dx == 0 && dy == 0 {
-				// self always bright white
-				fmt.Fprint(w, ANSIWhiteBright+"@"+ANSIReset)
-				continue
-			}
-			// Presence overlay: if a presence cue exists here, draw it
-			if pt, ok := presenceMap[pos]; ok {
+				cell = ANSIWhiteBright + "@" + ANSIReset
+			} else if pt, ok := presenceMap[pos]; ok {
 				switch pt {
-				case string(agent.PresenceHumanOther):
-					fmt.Fprint(w, ANSICyan+"@"+ANSIReset)
-					continue
-				case string(agent.PresenceNPC):
-					fmt.Fprint(w, ANSIGrayDim+"@"+ANSIReset)
-					continue
-				case string(agent.PresenceSelf):
-					fmt.Fprint(w, ANSIWhiteBright+"@"+ANSIReset)
-					continue
+				case agent.PresenceSelf:
+					cell = ANSIWhiteBright + "@" + ANSIReset
+				case agent.PresenceHumanOther:
+					cell = ANSICyan + "@" + ANSIReset
+				case agent.PresenceNPC:
+					cell = ANSIGrayDim + "@" + ANSIReset
 				}
-			}
-			if g, ok := visMap[pos]; ok {
-				// marker
-				switch g {
-				case 'M':
-					fmt.Fprint(w, color("0;37", "M"))
-				case 0:
-					// visible empty
-					fmt.Fprint(w, ".")
-				default:
-					// hallucinated glyphs dim red
-					s := string(g)
-					// other humans are not in Visible; we cannot show them here
-					fmt.Fprint(w, color("2;35", s))
+			} else if tv, ok := visMap[pos]; ok {
+				// visible
+				isHalluc := false
+				if b, ok2 := knownMap[pos]; ok2 {
+					if b.Age > agent.ParanoiaThreshold {
+						isHalluc = true
+					}
 				}
+				if isHalluc {
+					cell = ANSIMagentaDim + string(tv.Glyph) + ANSIReset
+				} else {
+					cell = ANSIWhiteBright + string(tv.Glyph) + ANSIReset
+				}
+			} else if b, ok := knownMap[pos]; ok {
+				cell = ANSIGrayDim + string(b.Tile.Glyph) + ANSIReset
 			} else {
-				// unknown / fog
-				fmt.Fprint(w, color("1;30", "?"))
+				cell = ANSIGrayDim + "?" + ANSIReset
 			}
+			row.WriteString(cell)
 		}
-		fmt.Fprintln(w, "│")
+		lines = append(lines, row.String())
 	}
+	return lines
+}
 
-	fmt.Fprintln(w, "└────────────────────────────┘")
-
-	// NARRATION (0-2 lines) — keep nondisclosing and limited
+// BuildFrame assembles the Frame in memory. No IO.
+func BuildFrame(obs agent.Observation, ephemeral string, energy int, paranoia int, scars int) Frame {
+	grid := RenderGrid(obs)
+	// narration: up to 2 lines
+	narration := make([]string, 0, 2)
 	if len(obs.Presence) > 0 {
-		fmt.Fprintln(w, "You sense presences nearby.")
+		narration = append(narration, "You sense presences nearby.")
 	} else {
-		fmt.Fprintln(w, "")
+		narration = append(narration, "")
 	}
+	// second narration line reserved
+	narration = append(narration, "")
 
-	// Ephemeral single-line feedback (client-only). Appears below narration
-	if ephemeral != "" {
-		fmt.Fprintln(w, ephemeral)
-	} else {
-		// pad so layout is stable
-		fmt.Fprintln(w, "")
-	}
-
-	// HUD line
+	// HUD
+	hud := make([]string, 0, 2)
 	hudLabel := color("2;36", "Energy:")
 	energyStr := fmt.Sprintf(" %d/%d", energy, 100)
 	if energy < 30 {
 		energyStr = color("1;33", energyStr)
 	}
-	fmt.Fprintf(w, "%s%s  Paranoia: %d  Scars: %d  Beliefs: %d\n", hudLabel, energyStr, paranoia, scars, len(obs.Known))
+	hudLine := fmt.Sprintf("%s%s  Paranoia: %d  Scars: %d  Beliefs: %d", hudLabel, energyStr, paranoia, scars, len(obs.Known))
+	hud = append(hud, hudLine)
 
-	// Visual separator then prompt (cursor lands here)
-	fmt.Fprintln(w, "")
-	fmt.Fprint(w, "> ")
-	fmt.Fprint(w, prompt)
-	fmt.Fprint(w, showCursor)
+	return Frame{
+		Grid:      grid,
+		Narration: narration,
+		Ephemeral: ephemeral,
+		HUD:       hud,
+		Prompt:    "> ",
+	}
 }
 
-// Helper used by tests to render with a short prompt
+// RenderFrame performs the actual IO to the writer for a fully-built Frame.
+func RenderFrame(w io.Writer, f Frame) {
+	var sb strings.Builder
+	writeLine := func(b *strings.Builder, s string) {
+		b.WriteString(s)
+		b.WriteString("\r\n")
+	}
+
+	// Absolute screen reset and home cursor
+	sb.WriteString(clearScreen)
+	sb.WriteString(cursorHome)
+
+	// Fixed separator width (consistent frame width)
+	const fixedWidth = 40
+	ansiRE := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	sepLen := fixedWidth
+	sep := strings.Repeat("-", sepLen)
+	writeLine(&sb, sep)
+	writeLine(&sb, "WORLD")
+	writeLine(&sb, sep)
+
+	// Grid lines
+	for _, line := range f.Grid {
+		vis := ansiRE.ReplaceAllString(line, "")
+		visLen := len([]rune(vis))
+		if visLen < sepLen {
+			line = line + strings.Repeat(" ", sepLen-visLen)
+		} else if visLen > sepLen {
+			// If the visible content exceeds fixed width, truncate the visible
+			// portion but keep ANSI sequences omitted (rare for 5x5 grid).
+			runes := []rune(ansiRE.ReplaceAllString(line, ""))
+			truncated := string(runes[:sepLen])
+			line = truncated
+		}
+		writeLine(&sb, line)
+	}
+
+	writeLine(&sb, sep)
+	// Narration: exactly two lines (pad if empty)
+	for i := 0; i < 2; i++ {
+		if i < len(f.Narration) {
+			writeLine(&sb, f.Narration[i])
+		} else {
+			writeLine(&sb, "")
+		}
+	}
+	// Ephemeral
+	if f.Ephemeral != "" {
+		writeLine(&sb, f.Ephemeral)
+	} else {
+		writeLine(&sb, "")
+	}
+
+	writeLine(&sb, sep)
+	// HUD lines
+	for _, h := range f.HUD {
+		vis := ansiRE.ReplaceAllString(h, "")
+		if len([]rune(vis)) < sepLen {
+			h = h + strings.Repeat(" ", sepLen-len([]rune(vis)))
+		}
+		writeLine(&sb, h)
+	}
+	writeLine(&sb, sep)
+	// Prompt line
+	sb.WriteString(f.Prompt)
+
+	// flush buffer to writer
+	_, _ = io.WriteString(w, sb.String())
+}
+
+// RenderTo kept for external callers; builds frame and writes it.
+func RenderTo(w io.Writer, obs agent.Observation, energy int, paranoia int, scars int, prompt string, ephemeral string) {
+	f := BuildFrame(obs, ephemeral, energy, paranoia, scars)
+	// ensure prompt uses provided prompt string appended to default prompt
+	if prompt != "" {
+		f.Prompt = f.Prompt + prompt
+	}
+	RenderFrame(w, f)
+}
+
+// RenderForTest is a helper used by tests to render with default HUD values.
 func RenderForTest(obs agent.Observation) string {
 	var b strings.Builder
 	RenderTo(&b, obs, 100, 3, 0, "", "")

@@ -36,7 +36,7 @@ func defaultSocket() string {
 	return filepath.Join(persist.BaseDir(), "socket")
 }
 
-func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map[string]context.CancelFunc, mu *sync.Mutex) {
+func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map[string]context.CancelFunc, mu *sync.Mutex, rt *runtime.Runtime, startRuntime func()) {
 	defer conn.Close()
 	// Read hello
 	var h helloMsg
@@ -108,6 +108,9 @@ func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map
 		agents[agentID] = rh
 		mu.Unlock()
 	}
+	if startRuntime != nil {
+		startRuntime()
+	}
 	// Manage per-agent connection cancellation so reconnect replaces writers.
 	mu.Lock()
 	if cancels == nil {
@@ -144,6 +147,36 @@ func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map
 			}
 		}
 	}()
+
+	// mark this RemoteHuman as connected for runtime blocking reads
+	rh.SetConnected(true)
+
+	// Bootstrap observation: send a single pre-tick snapshot to the client
+	// so the client can render once before waiting for input. This must not
+	// mutate cognition or advance ticks. Prefer a runtime snapshot when
+	// available; otherwise synthesize a minimal zero snapshot.
+	var snap runtime.Snapshot
+	var hasSnap bool
+	if rt != nil {
+		if s, ok := rt.SnapshotForDebug(agentID); ok {
+			snap = s
+			hasSnap = true
+		}
+	}
+	if !hasSnap {
+		snap = runtime.Snapshot{Tick: 0, Position: core.Position{X: 0, Y: 0}, Visible: nil}
+	}
+	obs := agent.Observation{
+		Visible:  snap.Visible,
+		Known:    []agent.Belief{},
+		Tick:     snap.Tick,
+		Position: snap.Position,
+		Presence: nil,
+	}
+	select {
+	case rh.SendObservation <- obs:
+	default:
+	}
 
 	// Reader loop for inputs
 	dec := bufio.NewReader(conn)
@@ -192,6 +225,40 @@ func main() {
 	started := false
 	var rt *runtime.Runtime
 
+	startRuntimeIfNeeded := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if started || len(agents) == 0 {
+			return
+		}
+		started = true
+		// Build agent slice
+		list := make([]agent.Agent, 0, len(agents)+1)
+		for _, a := range agents {
+			list = append(list, a)
+		}
+		// Add one oscillating NPC so world moves
+		list = append(list, agent.NewOscillating("npc-osc"))
+		rt = runtime.New(list)
+		// Start tick loop honoring existing runtime.TickOnce
+		go func() {
+			var delay time.Duration = 200 * time.Millisecond
+			if *dev {
+				delay = 50 * time.Millisecond
+			}
+			for {
+				if *dev {
+					log.Printf("tick_start")
+				}
+				_ = rt.TickOnce()
+				if *dev {
+					log.Printf("tick_end")
+				}
+				time.Sleep(delay)
+			}
+		}()
+	}
+
 	// accept loop
 	go func() {
 		for {
@@ -201,39 +268,7 @@ func main() {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			go handleConn(c, agents, cancels, &mu)
-
-			// If runtime not started and we have at least one agent, start it.
-			mu.Lock()
-			if !started && len(agents) > 0 {
-				started = true
-				// Build agent slice
-				list := make([]agent.Agent, 0, len(agents)+1)
-				for _, a := range agents {
-					list = append(list, a)
-				}
-				// Add one oscillating NPC so world moves
-				list = append(list, agent.NewOscillating("npc-osc"))
-				rt = runtime.New(list)
-				// Start tick loop honoring existing runtime.TickOnce
-				go func() {
-					var delay time.Duration = 200 * time.Millisecond
-					if *dev {
-						delay = 50 * time.Millisecond
-					}
-					for {
-						if *dev {
-							log.Printf("tick_start")
-						}
-						_ = rt.TickOnce()
-						if *dev {
-							log.Printf("tick_end")
-						}
-						time.Sleep(delay)
-					}
-				}()
-			}
-			mu.Unlock()
+			go handleConn(c, agents, cancels, &mu, rt, startRuntimeIfNeeded)
 		}
 	}()
 

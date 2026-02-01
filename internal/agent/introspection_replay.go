@@ -35,9 +35,13 @@ func (r *snapshotRing) append(s IntrospectionSnapshot) {
 // returns ok=false if offset >= count
 func (r *snapshotRing) getFromNewest(offset int) (IntrospectionSnapshot, bool) {
 	var empty IntrospectionSnapshot
-	if offset < 0 || offset >= r.count { return empty, false }
+	if offset < 0 || offset >= r.count {
+		return empty, false
+	}
 	idx := (r.head - offset) % len(r.buf)
-	if idx < 0 { idx += len(r.buf) }
+	if idx < 0 {
+		idx += len(r.buf)
+	}
 	return r.buf[idx], true
 }
 

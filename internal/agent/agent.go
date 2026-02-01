@@ -50,5 +50,5 @@ const (
 // Conflict / scar constants
 const (
 	ConflictThreshold = 3
-	ScarPenalty = 2
+	ScarPenalty       = 2
 )
