@@ -1,6 +1,9 @@
 package runtime
 
-import "github.com/divijg19/Nightshade/internal/core"
+import (
+	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/core"
+)
 
 type Snapshot struct {
 	Tick     int
@@ -10,6 +13,11 @@ type Snapshot struct {
 	Energy   int
 	Visible  []core.TileView
 	Known    []core.TileView
+
+	// Presentation-only metadata for v0.3.0 UI.
+	Mode    string
+	Board   agent.BoardView
+	Dungeon agent.DungeonView
 }
 
 func (s Snapshot) KnownTiles() []core.TileView {
@@ -30,3 +38,12 @@ func (s Snapshot) TickValue() int { return s.Tick }
 // This is a lightweight accessor that exposes the authoritative position but
 // does not expose any memory or age information.
 func (s Snapshot) PositionValue() core.Position { return s.Position }
+
+// ViewMode exposes the UI hint for render mode.
+func (s Snapshot) ViewMode() string { return s.Mode }
+
+// BoardValue exposes the current signal board view.
+func (s Snapshot) BoardValue() agent.BoardView { return s.Board }
+
+// DungeonValue exposes the current dungeon HUD.
+func (s Snapshot) DungeonValue() agent.DungeonView { return s.Dungeon }

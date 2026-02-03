@@ -24,6 +24,47 @@ type Observation struct {
 	// Presence contains ephemeral positional cues about nearby agents/NPCs.
 	// These are belief-derived impressions only and must not expose runtime truth.
 	Presence []PresenceCue
+
+	// Mode is a UI hint describing what the client should render.
+	// It is purely informational and must not affect simulation.
+	Mode string `json:"mode,omitempty"`
+	// Board is populated when Mode == "board".
+	Board *BoardView `json:"board,omitempty"`
+	// Dungeon is populated when Mode == "dungeon".
+	Dungeon *DungeonView `json:"dungeon,omitempty"`
+}
+
+// BoardView is a compact, client-facing representation of the server-owned Signal Board.
+// It is presentation-only.
+type BoardView struct {
+	Cursor  int          `json:"cursor"`
+	Signals []SignalView `json:"signals"`
+}
+
+type SignalView struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Anchor   string `json:"anchor"`
+	Zone     string `json:"zone"`
+	Presence string `json:"presence"`
+	Decay    int    `json:"decay"`
+	Locked   bool   `json:"locked"`
+}
+
+// DungeonView is a client-facing view of dungeon pressure/risks.
+// It is presentation-only.
+type DungeonView struct {
+	Grid            [][]rune `json:"grid,omitempty"`
+	Pressure        int      `json:"pressure"`
+	MaxPressure     int      `json:"max_pressure"`
+	Tick            int      `json:"tick"`
+	InstabilityBand int      `json:"instability_band"`
+
+	// Legacy/forward-compat fields (unused in pressure-only step).
+	ExitStability int    `json:"exit_stability,omitempty"`
+	AnchorType    string `json:"anchor_type,omitempty"`
+	AtAnchor      bool   `json:"at_anchor,omitempty"`
+	AtExit        bool   `json:"at_exit,omitempty"`
 }
 
 // PresenceType enumerates the kinds of perceived presences.

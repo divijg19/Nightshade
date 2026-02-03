@@ -3,15 +3,22 @@ package runtime
 import (
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/core"
+	"github.com/divijg19/Nightshade/internal/dungeon"
+	"github.com/divijg19/Nightshade/internal/signal"
 	"github.com/divijg19/Nightshade/internal/world"
 )
 
 const defaultVisibilityRadius = 2
 
 type Runtime struct {
-	tick   int
-	agents []agent.Agent
-	world  *world.World
+	tick        int
+	agents      []agent.Agent
+	world       *world.World
+	board       *signal.Board
+	boardCursor map[string]int
+	// v0.3.0: dungeon commitment spine.
+	dungeonByAgent map[string]*dungeon.Instance
+	signalByAgent  map[string]string // agentID -> locked signal ID (while inside dungeon)
 }
 
 func New(agents []agent.Agent) *Runtime {
@@ -26,9 +33,13 @@ func New(agents []agent.Agent) *Runtime {
 		})
 	}
 	return &Runtime{
-		tick:   0,
-		agents: agents,
-		world:  w,
+		tick:           0,
+		agents:         agents,
+		world:          w,
+		board:          signal.NewBoard(5),
+		boardCursor:    map[string]int{},
+		dungeonByAgent: map[string]*dungeon.Instance{},
+		signalByAgent:  map[string]string{},
 	}
 }
 

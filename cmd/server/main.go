@@ -173,6 +173,19 @@ func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map
 		Position: snap.Position,
 		Presence: nil,
 	}
+	// Copy presentation-only metadata without mutating agent cognition.
+	obs.Mode = snap.Mode
+	if len(snap.Board.Signals) > 0 {
+		b := snap.Board
+		obs.Board = &b
+	}
+	if snap.Dungeon.ExitStability > 0 || snap.Dungeon.Pressure > 0 || snap.Dungeon.AnchorType != "" {
+		d := snap.Dungeon
+		obs.Dungeon = &d
+		if obs.Mode == "" {
+			obs.Mode = "dungeon"
+		}
+	}
 	select {
 	case rh.SendObservation <- obs:
 	default:

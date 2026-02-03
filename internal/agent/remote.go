@@ -188,6 +188,27 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
 		effectiveParanoia = ParanoiaThreshold - 2
 	}
 	obs := buildObservation(r.memory, snapshot, prev, r.energy, effectiveParanoia)
+	// Copy presentation-only metadata from snapshot if available.
+	if vm, ok := snapshot.(interface{ ViewMode() string }); ok {
+		obs.Mode = vm.ViewMode()
+	}
+	if bv, ok := snapshot.(interface{ BoardValue() BoardView }); ok {
+		b := bv.BoardValue()
+		if len(b.Signals) > 0 {
+			obs.Board = &b
+		}
+	}
+	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
+		d := dv.DungeonValue()
+		// Always include dungeon view when the snapshot indicates dungeon mode.
+		// This allows the client/renderer to display pressure starting at 0.
+		if obs.Mode == "dungeon" || d.MaxPressure > 0 || len(d.Grid) > 0 {
+			obs.Dungeon = &d
+			if obs.Mode == "" {
+				obs.Mode = "dungeon"
+			}
+		}
+	}
 	// Compute positional presence cues from belief signals (best-effort, non-leaky):
 	// if other agents have emitted belief signals within BeliefRadius, add an
 	// ephemeral PresenceCue. Do not include identities.
