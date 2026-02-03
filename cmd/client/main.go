@@ -310,6 +310,25 @@ func main() {
 					renderNow(lastObs, "", false)
 				}
 
+				// v0.3.0: signal selection -> enter signal by number.
+				if lastObs.Mode == "board" && lastObs.Board != nil {
+					if key >= '1' && key <= '9' {
+						idx := int(key - '1')
+						if idx >= 0 && idx < len(lastObs.Board.Signals) {
+							if showHelp {
+								showHelp = false
+							}
+							sid := lastObs.Board.Signals[idx].ID
+							cmd := "ENTER_SIGNAL " + sid
+							desc := "enter signal " + sid
+							pending = &pendingAction{key: 'e', desc: desc, basePos: lastObs.Position}
+							renderNow(lastObs, "→ "+desc, true)
+							_ = nnet.WriteFrame(conn, inputMsg{Type: "input", Key: cmd})
+							break inputLoop
+						}
+					}
+				}
+
 				if actionKey, ok := actionFromKey(key); ok {
 					if showHelp {
 						showHelp = false

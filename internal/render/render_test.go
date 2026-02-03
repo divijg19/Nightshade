@@ -144,3 +144,102 @@ func TestEpistemicColoring(t *testing.T) {
 		t.Fatalf("hallucinated tile not magenta")
 	}
 }
+
+func TestDungeonHeader_LabelAndColor(t *testing.T) {
+	baseGrid := [][]rune{
+		[]rune("#######"),
+		[]rune("#.....#"),
+		[]rune("#.....#"),
+		[]rune("#..A..#"),
+		[]rune("#.....#"),
+		[]rune("#.....#"),
+		[]rune("###X###"),
+	}
+
+	cases := []struct {
+		band        int
+		label       string
+		wantColor   string
+		shouldColor bool
+	}{
+		{band: 0, label: "STABLE", wantColor: "", shouldColor: false},
+		{band: 1, label: "UNSTABLE", wantColor: ANSIYellowDim, shouldColor: true},
+		{band: 2, label: "DANGEROUS", wantColor: ANSIYellowBright, shouldColor: true},
+		{band: 3, label: "CRITICAL", wantColor: ANSIRedBright, shouldColor: true},
+	}
+
+	for _, tc := range cases {
+		obs := agent.Observation{
+			Tick:     42,
+			Position: core.Position{X: 0, Y: 0},
+			Mode:     "dungeon",
+			Dungeon: &agent.DungeonView{
+				Grid:            baseGrid,
+				Pressure:        0,
+				MaxPressure:     20,
+				Tick:            42,
+				InstabilityBand: tc.band,
+			},
+		}
+		out := RenderForTest(obs)
+		if !strings.Contains(out, "DUNGEON  tick 42") {
+			t.Fatalf("missing dungeon header")
+		}
+		if !strings.Contains(out, "["+tc.label+"]") {
+			// stable has no coloring, others have ANSI wrapped; allow either.
+			if tc.shouldColor {
+				if !strings.Contains(out, "["+tc.wantColor+tc.label+ANSIReset+"]") {
+					t.Fatalf("band=%d missing colored label %q", tc.band, tc.label)
+				}
+			} else {
+				t.Fatalf("band=%d missing plain label %q", tc.band, tc.label)
+			}
+		}
+		if tc.shouldColor {
+			if !strings.Contains(out, tc.wantColor+tc.label+ANSIReset) {
+				t.Fatalf("band=%d missing ANSI color code", tc.band)
+			}
+		}
+	}
+}
+
+func TestDungeonGrid_SubstitutionDeterministic(t *testing.T) {
+	grid := [][]rune{
+		[]rune("#######"),
+		[]rune("#.....#"),
+		[]rune("#.....#"),
+		[]rune("#..A..#"),
+		[]rune("#.....#"),
+		[]rune("#.....#"),
+		[]rune("###X###"),
+	}
+
+	obs := agent.Observation{
+		Tick:     0,
+		Position: core.Position{X: 0, Y: 0},
+		Mode:     "dungeon",
+		Dungeon: &agent.DungeonView{
+			Grid:            grid,
+			Pressure:        12,
+			MaxPressure:     20,
+			Tick:            0,
+			InstabilityBand: 2,
+		},
+	}
+	out := RenderForTest(obs)
+
+	// Band>=2 wall flicker: row0 y=0 with (x+y+tick)%3==0 => x=0,3,6 => "%##%##%"
+	if !strings.Contains(out, "%##%##%") {
+		t.Fatalf("expected wall flicker substitution in output")
+	}
+	// Band>=1 floor wobble: row1 y=1 with (x+y+tick)%4==0 => x=3 => "#..~..#"
+	if !strings.Contains(out, "#..~..#") {
+		t.Fatalf("expected floor wobble substitution in output")
+	}
+
+	// Deterministic: rendering same obs twice is identical.
+	out2 := RenderForTest(obs)
+	if out != out2 {
+		t.Fatalf("expected deterministic render output")
+	}
+}

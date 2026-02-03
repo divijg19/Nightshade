@@ -19,12 +19,15 @@ const (
 )
 
 const (
-	ANSIReset       = "\x1b[0m"
-	ANSIWhiteBright = "\x1b[97m"
-	ANSICyan        = "\x1b[36m"
-	ANSIYellow      = "\x1b[33m"
-	ANSIGrayDim     = "\x1b[90m"
-	ANSIMagentaDim  = "\x1b[2;35m"
+	ANSIReset        = "\x1b[0m"
+	ANSIWhiteBright  = "\x1b[97m"
+	ANSICyan         = "\x1b[36m"
+	ANSIYellow       = "\x1b[33m"
+	ANSIYellowBright = "\x1b[1;33m"
+	ANSIYellowDim    = "\x1b[2;33m"
+	ANSIRedBright    = "\x1b[1;31m"
+	ANSIGrayDim      = "\x1b[90m"
+	ANSIMagentaDim   = "\x1b[2;35m"
 )
 
 func color(code string, s string) string { return esc + "[" + code + "m" + s + esc + "[0m" }
@@ -42,6 +45,7 @@ type Options struct {
 type Frame struct {
 	Tick      int
 	Options   Options
+	Header    string
 	Grid      []string
 	Narration []string
 	Status    []string
@@ -52,6 +56,49 @@ type Frame struct {
 // RenderGrid returns fixed-size, colorized grid lines for the observation.
 // It does NOT perform any IO.
 func RenderGrid(obs agent.Observation) []string {
+	if obs.Mode == "board" && obs.Board != nil {
+		lines := make([]string, 0, 9)
+		lines = append(lines, "== SIGNAL BOARD ==")
+		lines = append(lines, "")
+		for i, s := range obs.Board.Signals {
+			cursor := " "
+			if i == obs.Board.Cursor {
+				cursor = ">"
+			}
+			lock := ""
+			if s.Locked {
+				lock = " " + ANSIGrayDim + "(locked)" + ANSIReset
+			}
+			lines = append(lines, fmt.Sprintf("%s [%d] %s  %s  Decay:%d%s", cursor, i+1, s.Type, s.Anchor, s.Decay, lock))
+		}
+		lines = append(lines, "")
+		lines = append(lines, ANSIGrayDim+"Press 1-"+fmt.Sprintf("%d", len(obs.Board.Signals))+" to enter."+ANSIReset)
+		return lines
+	}
+
+	if obs.Mode == "dungeon" {
+		lines := make([]string, 0, 16)
+		if obs.Dungeon == nil {
+			return []string{"(dungeon)"}
+		}
+		lines = append(lines, fmt.Sprintf("PRESSURE %d / %d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure))
+		lines = append(lines, strings.Repeat("-", 7))
+		if len(obs.Dungeon.Grid) > 0 {
+			band := obs.Dungeon.InstabilityBand
+			for y, row := range obs.Dungeon.Grid {
+				out := make([]rune, len(row))
+				for x, ch := range row {
+					out[x] = applyInstabilityGlyph(ch, band, x, y, obs.Tick)
+				}
+				lines = append(lines, string(out))
+			}
+		} else {
+			lines = append(lines, "(no grid)")
+		}
+		lines = append(lines, strings.Repeat("-", 7))
+		return lines
+	}
+
 	// viewport radius (produces 5x5 grid)
 	r := 2
 	size := 2*r + 1
@@ -173,9 +220,20 @@ func maxVisibleWidth(ansiRE *regexp.Regexp, lines []string) int {
 
 func BuildFrameWithOptions(obs agent.Observation, status string, energy int, paranoia int, scars int, opts Options) Frame {
 	grid := RenderGrid(obs)
-	// narration: a single subtle line
+	// narration: at most one subtle line
 	narration := make([]string, 0, 1)
-	if !opts.Minimal && len(obs.Presence) > 0 {
+	if obs.Mode == "dungeon" {
+		if obs.Dungeon != nil {
+			switch obs.Dungeon.InstabilityBand {
+			case 1:
+				narration = append(narration, "The air feels unstable.")
+			case 2:
+				narration = append(narration, "The dungeon resists your presence.")
+			case 3:
+				narration = append(narration, "The dungeon is close to collapse.")
+			}
+		}
+	} else if !opts.Minimal && len(obs.Presence) > 0 {
 		narration = append(narration, "You sense presences nearby.")
 	}
 
@@ -196,15 +254,78 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 		prompt = "> "
 	}
 
+	header := "WORLD  " + ANSIGrayDim + fmt.Sprintf("tick %d", obs.Tick) + ANSIReset
+	if obs.Mode == "dungeon" {
+		band := 0
+		if obs.Dungeon != nil {
+			band = obs.Dungeon.InstabilityBand
+		}
+		label, colored := instabilityLabel(band)
+		header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
+		_ = label
+	}
+
 	return Frame{
 		Tick:      obs.Tick,
 		Options:   opts,
+		Header:    header,
 		Grid:      grid,
 		Narration: narration,
 		Status:    statusLines,
 		HUD:       hud,
 		Prompt:    prompt,
 	}
+}
+
+func instabilityLabel(band int) (plain string, colored string) {
+	switch band {
+	case 0:
+		plain = "STABLE"
+		return plain, plain
+	case 1:
+		plain = "UNSTABLE"
+		return plain, ANSIYellowDim + plain + ANSIReset
+	case 2:
+		plain = "DANGEROUS"
+		return plain, ANSIYellowBright + plain + ANSIReset
+	default:
+		plain = "CRITICAL"
+		return plain, ANSIRedBright + plain + ANSIReset
+	}
+}
+
+func applyInstabilityGlyph(ch rune, band int, x int, y int, tick int) rune {
+	// Never alter special markers.
+	if ch == 'E' || ch == 'A' || ch == 'X' {
+		return ch
+	}
+
+	out := ch
+
+	// Band >=1: some floors wobble '.' -> '~'
+	if band >= 1 && out == '.' {
+		if (x+y+tick)%4 == 0 {
+			out = '~'
+		}
+	}
+
+	// Band >=2: some walls flicker '#' <-> '%'
+	if band >= 2 && out == '#' {
+		if (x+y+tick)%3 == 0 {
+			out = '%'
+		}
+	}
+
+	// Band >=3: unknown tiles appear more frequently (visual only)
+	if band >= 3 {
+		if out == '.' || out == '~' {
+			if (x+y+tick)%4 == 1 {
+				out = '?'
+			}
+		}
+	}
+
+	return out
 }
 
 // BuildFrame assembles the Frame in memory. No IO.
@@ -237,13 +358,28 @@ func RenderFrame(w io.Writer, f Frame) {
 	if frameW < 22 {
 		frameW = 22
 	}
+	// Guardrail: if any line would exceed the configured width, expand
+	// rather than truncating/misaligning (still capped below).
+	header := f.Header
+	if header == "" {
+		header = "WORLD  " + ANSIGrayDim + fmt.Sprintf("tick %d", f.Tick) + ANSIReset
+	}
+	all := make([]string, 0, len(f.Grid)+len(f.Narration)+len(f.Status)+len(f.HUD)+1)
+	all = append(all, header)
+	all = append(all, f.Grid...)
+	all = append(all, f.Narration...)
+	all = append(all, f.Status...)
+	all = append(all, f.HUD...)
+	if need := maxVisibleWidth(ansiRE, all); need > frameW {
+		frameW = need
+	}
 	if frameW > 60 {
 		frameW = 60
 	}
 	sep := strings.Repeat("-", frameW)
 
 	// Header + single separator
-	writeLine(&sb, "WORLD  "+ANSIGrayDim+fmt.Sprintf("tick %d", f.Tick)+ANSIReset)
+	writeLine(&sb, header)
 	if !f.Options.Minimal {
 		writeLine(&sb, sep)
 	}
