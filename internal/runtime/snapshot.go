@@ -18,6 +18,8 @@ type Snapshot struct {
 	Mode    string
 	Board   agent.BoardView
 	Dungeon agent.DungeonView
+	// One-shot event message propagated to the agent (e.g., forced eject)
+	Event   string
 }
 
 func (s Snapshot) KnownTiles() []core.TileView {
