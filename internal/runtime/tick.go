@@ -213,6 +213,14 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		markerPos.X,
 		markerPos.Y,
 	)
+
+    // Deliver any pending one-shot event (e.g. forced-eject) to the next snapshot.
+    // Do this before mode branching so events set during TickOnce() are seen
+    // even if the agent's dungeon binding was removed earlier in the tick.
+    if ev, ok := r.pendingEvents[a.ID()]; ok {
+        snap.Event = ev
+        delete(r.pendingEvents, a.ID())
+    }
 	// Do NOT populate snap.Known here. Known is the agent's interpretation
 	// (belief) and must be maintained by the agent's Memory. Runtime reports
 	// only current visibility in Snapshot.Visible.
@@ -305,11 +313,6 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		if band == 3 && !r.dungeonNarration[a.ID()]["collapse_warning"] {
 			r.dungeonNarration[a.ID()]["collapse_warning"] = true
 			snap.Dungeon.Event = "The exit shows signs of collapse."
-		}
-		// propagate any pending global event (forced eject) into snapshot as event on board mode later
-		if ev, ok := r.pendingEvents[a.ID()]; ok {
-			snap.Event = ev
-			delete(r.pendingEvents, a.ID())
 		}
 
 		return snap

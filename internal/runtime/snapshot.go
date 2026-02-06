@@ -49,3 +49,6 @@ func (s Snapshot) BoardValue() agent.BoardView { return s.Board }
 
 // DungeonValue exposes the current dungeon HUD.
 func (s Snapshot) DungeonValue() agent.DungeonView { return s.Dungeon }
+
+// EventValue exposes a one-shot event message attached to this snapshot.
+func (s Snapshot) EventValue() string { return s.Event }

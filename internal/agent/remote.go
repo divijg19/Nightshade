@@ -209,6 +209,12 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
 			}
 		}
 	}
+	// Copy one-shot server event if present.
+	if ev, ok := snapshot.(interface{ EventValue() string }); ok {
+		if e := ev.EventValue(); e != "" {
+			obs.Event = e
+		}
+	}
 	// Compute positional presence cues from belief signals (best-effort, non-leaky):
 	// if other agents have emitted belief signals within BeliefRadius, add an
 	// ephemeral PresenceCue. Do not include identities.

@@ -109,3 +109,36 @@ func TestForcedEject_Isolation(t *testing.T) {
         }
     }
 }
+
+// Test that the one-shot pending event set during forced eject is delivered
+// on the subsequent snapshot (board mode) when the agent is ejected.
+func TestForcedEject_DeliversEventOnEject(t *testing.T) {
+    a := agent.NewRemoteHumanFromExisting("A", agent.NewMemory(), agent.MaxEnergy)
+    rt := New([]agent.Agent{a})
+
+    // Enter S000
+    a.RecvInput <- "ENTER_SIGNAL S000"
+    rt.TickOnce()
+    _ = mustRecvObs(t, a)
+
+    d := rt.dungeonByAgent["A"]
+    if d == nil {
+        t.Fatalf("expected dungeon after enter")
+    }
+    max := d.MaxPressure
+
+    // Advance to eject threshold
+    for i := 1; i <= max; i++ {
+        a.RecvInput <- "."
+        rt.TickOnce()
+        obs := mustRecvObs(t, a)
+        if i == max {
+            if obs.Mode != "board" {
+                t.Fatalf("expected board mode on eject tick, got %q", obs.Mode)
+            }
+            if obs.Event == "" {
+                t.Fatalf("expected one-shot eject event delivered on board snapshot")
+            }
+        }
+    }
+}
