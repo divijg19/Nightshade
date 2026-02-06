@@ -43,10 +43,12 @@ func (m *Memory) UpdateFromVisible(obs interface{}) map[core.Position]MemoryTile
 		for _, tv := range v.VisibleTiles() {
 			if old, ok := m.tiles[tv.Position]; ok {
 				prev[tv.Position] = old
+				// Preserve scar level when updating from a currently visible tile.
+				m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick, ScarLevel: old.ScarLevel}
 			} else {
 				prev[tv.Position] = MemoryTile{LastSeen: -1}
+				m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick}
 			}
-			m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick}
 		}
 	}
 	return prev

@@ -49,6 +49,7 @@ type SignalView struct {
 	Presence string `json:"presence"`
 	Decay    int    `json:"decay"`
 	Locked   bool   `json:"locked"`
+	Burned   bool   `json:"burned"`
 }
 
 // DungeonView is a client-facing view of dungeon pressure/risks.
@@ -59,6 +60,11 @@ type DungeonView struct {
 	MaxPressure     int      `json:"max_pressure"`
 	Tick            int      `json:"tick"`
 	InstabilityBand int      `json:"instability_band"`
+
+	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
+	ExitState    string `json:"exit_state,omitempty"`
+	// Event is a one-shot narration string (populated by server)
+	Event        string `json:"event,omitempty"`
 
 	// Legacy/forward-compat fields (unused in pressure-only step).
 	ExitStability int    `json:"exit_stability,omitempty"`

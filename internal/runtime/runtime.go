@@ -19,6 +19,10 @@ type Runtime struct {
 	// v0.3.0: dungeon commitment spine.
 	dungeonByAgent map[string]*dungeon.Instance
 	signalByAgent  map[string]string // agentID -> locked signal ID (while inside dungeon)
+
+	// v0.3.1: per-agent one-shot events and narration tracking
+	pendingEvents    map[string]string          // agentID -> event message shown once in next snapshot
+	dungeonNarration map[string]map[string]bool // agentID -> map[eventName]seen
 }
 
 func New(agents []agent.Agent) *Runtime {
@@ -40,6 +44,8 @@ func New(agents []agent.Agent) *Runtime {
 		boardCursor:    map[string]int{},
 		dungeonByAgent: map[string]*dungeon.Instance{},
 		signalByAgent:  map[string]string{},
+		pendingEvents:    map[string]string{},
+		dungeonNarration: map[string]map[string]bool{},
 	}
 }
 

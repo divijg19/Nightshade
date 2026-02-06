@@ -34,6 +34,7 @@ type Signal struct {
 	Presence   PresenceLevel
 	DecayTicks int
 	LockedBy   string // empty means unlocked
+	Burned     bool   // true when permanently burned/unenterable
 }
 
 type Board struct {
@@ -71,6 +72,9 @@ func (b *Board) Lock(id string, agentID string) bool {
 		if b.signals[i].ID != id {
 			continue
 		}
+		if b.signals[i].Burned {
+			return false
+		}
 		if b.signals[i].LockedBy != "" && b.signals[i].LockedBy != agentID {
 			return false
 		}
@@ -78,6 +82,18 @@ func (b *Board) Lock(id string, agentID string) bool {
 		return true
 	}
 	return false
+}
+
+// Burn marks a signal as burned (permanently unenterable) and clears locks.
+func (b *Board) Burn(id string) {
+	for i := range b.signals {
+		if b.signals[i].ID != id {
+			continue
+		}
+		b.signals[i].Burned = true
+		b.signals[i].LockedBy = ""
+		return
+	}
 }
 
 func (b *Board) Remove(id string) {
@@ -96,7 +112,9 @@ func (b *Board) Tick() {
 	out := b.signals[:0]
 	for _, s := range b.signals {
 		s.DecayTicks--
-		if s.DecayTicks <= 0 {
+		// Preserve signals that are currently locked or already burned so
+		// they remain visible on the board even if their decay expired.
+		if s.DecayTicks <= 0 && s.LockedBy == "" && !s.Burned {
 			continue
 		}
 		out = append(out, s)

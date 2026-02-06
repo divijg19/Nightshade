@@ -24,6 +24,39 @@ func (r *Runtime) TickOnce() Decisions {
 		}
 	}
 
+	// v0.3.1: check for forced eject (Pressure > MaxPressure) and apply effects
+	for _, a := range r.agents {
+		aid := a.ID()
+		if d, ok := r.dungeonByAgent[aid]; ok {
+			if d.Pressure >= d.MaxPressure {
+				// Forced eject: burn signal, destroy dungeon, apply scar, set event
+				sigID := r.signalByAgent[aid]
+				if r.board != nil && sigID != "" {
+					r.board.Burn(sigID)
+				}
+				// Apply +1 Scar to agent memory if present
+				if rh, ok2 := a.(*agent.RemoteHuman); ok2 {
+					mem := rh.Memory()
+					wpos, _ := r.world.PositionOf(aid)
+					pos := core.Position{X: wpos.X, Y: wpos.Y}
+					if mt, found := mem.GetMemoryTile(pos); found {
+						mt.ScarLevel++
+						mem.SetMemoryTile(pos, mt)
+					} else {
+						// create a minimal tile with scar
+						tv := core.TileView{Position: pos, Glyph: 'X', Visible: true}
+						mem.SetMemoryTile(pos, agent.MemoryTile{Tile: tv, LastSeen: r.tick, ScarLevel: 1})
+					}
+				}
+				// remove bindings
+				delete(r.dungeonByAgent, aid)
+				delete(r.signalByAgent, aid)
+				// schedule one-shot event for next snapshot
+				r.pendingEvents[aid] = "You are ejected from the dungeon!"
+			}
+		}
+	}
+
 	decisions := make(Decisions)
 
 	// 1. Observation phase: build snapshot for each agent and deliver to
@@ -195,18 +228,90 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			}
 			grid[y] = row
 		}
+		// Determine exit visibility state for this agent based on band/tick/position.
+		band := d.InstabilityBand()
+		ex := d.Exit
+		exitVisible := true
+		exitState := "visible"
+		switch {
+		case band >= 3:
+			exitVisible = false
+			exitState = "collapsed"
+		case band >= 11: // unreachable, kept for clarity
+			fallthrough
+		default:
+			// handle below
+		}
+		// band-specific handling
+		switch band {
+		case 1:
+			// flicker deterministic: visible when (x+y+tick)%2==0
+			if (ex.X+ex.Y+snap.Tick)%2 != 0 {
+				exitVisible = false
+				exitState = "flicker"
+			}
+		case 2:
+			// visible only when adjacent to agent
+			dx := snap.Position.X - ex.X
+			dy := snap.Position.Y - ex.Y
+			if dx < 0 {
+				dx = -dx
+			}
+			if dy < 0 {
+				dy = -dy
+			}
+			if dx+dy <= 1 {
+				exitVisible = true
+				exitState = "adjacent"
+			} else {
+				exitVisible = false
+				exitState = "hidden"
+			}
+		}
+
+		// If collapsed, ensure exit is not shown in grid.
+		if !exitVisible {
+			// replace exit glyph with wall for presentation
+			if ex.Y >= 0 && ex.Y < len(grid) && ex.X >= 0 && ex.X < len(grid[ex.Y]) {
+				grid[ex.Y][ex.X] = '#'
+			}
+		}
+
 		snap.Dungeon = agent.DungeonView{
 			Grid:            grid,
 			Pressure:        d.Pressure,
 			MaxPressure:     d.MaxPressure,
 			Tick:            snap.Tick,
-			InstabilityBand: d.InstabilityBand(),
+			InstabilityBand: band,
+			ExitState:       exitState,
 			// Keep legacy fields populated for forward compatibility.
 			ExitStability: d.ExitStability,
 			AnchorType:    string(d.AnchorType),
 			AtAnchor:      false,
 			AtExit:        false,
 		}
+		// One-shot narration events per band
+		if _, ok := r.dungeonNarration[a.ID()]; !ok {
+			r.dungeonNarration[a.ID()] = map[string]bool{}
+		}
+		if band == 1 && !r.dungeonNarration[a.ID()]["unstable"] {
+			r.dungeonNarration[a.ID()]["unstable"] = true
+			snap.Dungeon.Event = "The air feels unstable."
+		}
+		if band == 2 && !r.dungeonNarration[a.ID()]["dangerous"] {
+			r.dungeonNarration[a.ID()]["dangerous"] = true
+			snap.Dungeon.Event = "The dungeon resists your presence."
+		}
+		if band == 3 && !r.dungeonNarration[a.ID()]["collapse_warning"] {
+			r.dungeonNarration[a.ID()]["collapse_warning"] = true
+			snap.Dungeon.Event = "The exit shows signs of collapse."
+		}
+		// propagate any pending global event (forced eject) into snapshot as event on board mode later
+		if ev, ok := r.pendingEvents[a.ID()]; ok {
+			snap.Event = ev
+			delete(r.pendingEvents, a.ID())
+		}
+
 		return snap
 	}
 
@@ -225,6 +330,7 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				Presence: string(s.Presence),
 				Decay:    s.DecayTicks,
 				Locked:   s.LockedBy != "" && s.LockedBy != a.ID(),
+				Burned:   s.Burned,
 			})
 		}
 		snap.Board = agent.BoardView{Cursor: cursor, Signals: views}
