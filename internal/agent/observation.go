@@ -21,6 +21,8 @@ type Observation struct {
 	Tick    int
 	// Position is the agent's current world position (for centering view)
 	Position core.Position
+	// One-shot event message attached by server (e.g., forced eject narration)
+	Event    string
 	// Presence contains ephemeral positional cues about nearby agents/NPCs.
 	// These are belief-derived impressions only and must not expose runtime truth.
 	Presence []PresenceCue
