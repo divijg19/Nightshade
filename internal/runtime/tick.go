@@ -119,6 +119,24 @@ func (r *Runtime) TickOnce() Decisions {
 		if !ok {
 			continue
 		}
+		// Apply navigation distortion if agent is inside a dungeon in Dangerous band
+		// and the authoritative tick meets distortion cadence (tick % 3 == 0).
+		if d, ok := r.dungeonByAgent[a.ID()]; ok {
+			if d.Pressure >= 11 && r.tick%3 == 0 {
+				// Only rotate real MOVE actions; OBSERVE/WAIT unaffected.
+				switch action {
+				case agent.MOVE_N:
+					action = agent.MOVE_E
+				case agent.MOVE_E:
+					action = agent.MOVE_S
+				case agent.MOVE_S:
+					action = agent.MOVE_W
+				case agent.MOVE_W:
+					action = agent.MOVE_N
+				}
+			}
+		}
+
 		newPos := game.ResolveMovement(
 			pos,
 			action,
@@ -295,9 +313,21 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			// Keep legacy fields populated for forward compatibility.
 			ExitStability: d.ExitStability,
 			AnchorType:    string(d.AnchorType),
-			AtAnchor:      false,
-			AtExit:        false,
+				AtAnchor:      snap.Position == d.Anchor,
+				AtExit:        snap.Position == d.Exit,
 		}
+
+			// Populate decayed tiles slice for presentation and report distortion state.
+			decayed := make([]core.Position, 0, len(d.Decayed))
+			for p := range d.Decayed {
+				decayed = append(decayed, p)
+			}
+			snap.Dungeon.DecayedTiles = decayed
+			snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
+			labels := []string{"Stable", "Unstable", "Dangerous", "Critical"}
+			if band >= 0 && band < len(labels) {
+				snap.Dungeon.InstabilityLabel = labels[band]
+			}
 		// One-shot narration events per band
 		if _, ok := r.dungeonNarration[a.ID()]; !ok {
 			r.dungeonNarration[a.ID()] = map[string]bool{}
