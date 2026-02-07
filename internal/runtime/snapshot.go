@@ -20,6 +20,12 @@ type Snapshot struct {
 	Dungeon agent.DungeonView
 	// One-shot event message propagated to the agent (e.g., forced eject)
 	Event   string
+	// Ejected indicates the agent was forcibly removed from a dungeon
+	// during the prior authoritative tick, and EjectReason provides a
+	// short label (e.g., "pressure"). These are delivery-only fields
+	// intended for client presentation.
+	Ejected     bool
+	EjectReason string
 }
 
 func (s Snapshot) KnownTiles() []core.TileView {

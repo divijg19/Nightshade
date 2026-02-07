@@ -265,13 +265,31 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	}
 
 	// 12. Apply energy effects
+	// Apply energy effects with dungeon modifiers when available in the
+	// provided snapshot. This mirrors server rules so the local human UI
+	// remains consistent when used in tests.
+	extraMove := 0
+	extraObserve := 0
+	waitRestore := WaitEnergyRestore
+	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
+		d := dv.DungeonValue()
+		if d.InstabilityBand == 1 {
+			extraObserve = 1
+		}
+		if d.InstabilityBand == 2 {
+			waitRestore = 0
+		}
+		if d.InstabilityBand >= 3 {
+			extraMove = 1
+		}
+	}
 	switch final {
 	case MOVE_N, MOVE_S, MOVE_E, MOVE_W:
-		h.energy -= MoveEnergyCost
+		h.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
-		h.energy -= ObserveEnergyCost
+		h.energy -= (ObserveEnergyCost + extraObserve)
 	case WAIT:
-		h.energy += WaitEnergyRestore
+		h.energy += waitRestore
 	}
 	if h.energy > MaxEnergy {
 		h.energy = MaxEnergy

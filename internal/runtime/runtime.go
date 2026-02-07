@@ -22,6 +22,7 @@ type Runtime struct {
 
 	// v0.3.1: per-agent one-shot events and narration tracking
 	pendingEvents    map[string]string          // agentID -> event message shown once in next snapshot
+	pendingEjects    map[string]string          // agentID -> eject reason (delivered in next snapshot)
 	dungeonNarration map[string]map[string]bool // agentID -> map[eventName]seen
 }
 
@@ -45,6 +46,7 @@ func New(agents []agent.Agent) *Runtime {
 		dungeonByAgent: map[string]*dungeon.Instance{},
 		signalByAgent:  map[string]string{},
 		pendingEvents:    map[string]string{},
+		pendingEjects:    map[string]string{},
 		dungeonNarration: map[string]map[string]bool{},
 	}
 }

@@ -20,7 +20,13 @@ func (r *Runtime) TickOnce() Decisions {
 	// v0.3.0 pressure loop: advance dungeon pressure before snapshots.
 	for _, a := range r.agents {
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
-			d.Tick()
+			// When an agent is standing on the anchor tile, pressure gain
+			// is reduced: +1 every 2 authoritative ticks. Determine whether
+			// the agent is on anchor by comparing runtime world position.
+			wpos, _ := r.world.PositionOf(a.ID())
+			pos := core.Position{X: wpos.X, Y: wpos.Y}
+			atAnchor := pos == d.Anchor
+			d.TickWithAnchor(atAnchor, r.tick)
 		}
 	}
 
@@ -51,8 +57,9 @@ func (r *Runtime) TickOnce() Decisions {
 				// remove bindings
 				delete(r.dungeonByAgent, aid)
 				delete(r.signalByAgent, aid)
-				// schedule one-shot event for next snapshot
-				r.pendingEvents[aid] = "You are ejected from the dungeon!"
+				// schedule one-shot event and eject flag for next snapshot
+				r.pendingEvents[aid] = "The dungeon collapses and expels you."
+				r.pendingEjects[aid] = "pressure"
 			}
 		}
 	}
@@ -143,6 +150,39 @@ func (r *Runtime) TickOnce() Decisions {
 			r.world.Width(),
 			r.world.Height(),
 		)
+
+		// If agent is inside a dungeon and attempts to move onto the exit,
+		// treat that as an EXIT attempt (commitment). Enforce band/energy
+		// constraints server-side.
+				if d, ok := r.dungeonByAgent[a.ID()]; ok {
+					np := core.Position{X: newPos.X, Y: newPos.Y}
+					if np == d.Exit {
+				// check agent energy via concrete types
+				energy := agent.MaxEnergy
+				switch at := a.(type) {
+				case *agent.RemoteHuman:
+					energy = at.Energy()
+				case *agent.Human:
+					energy = at.Energy()
+				case *agent.Scripted:
+					energy = at.Energy()
+				}
+				band := d.InstabilityBand()
+				// If in CRITICAL band and exhausted (energy < 1) then exit fails.
+				if band >= 3 && energy < 1 {
+					// silent failure; renderer will be hinted via snapshot.BlockedActions
+				} else {
+					// Successful exit: reset pressure, mark instance done, remove bindings.
+					d.Pressure = 0
+					d.Done = true
+					d.DoneReason = "exit"
+					delete(r.dungeonByAgent, a.ID())
+					delete(r.signalByAgent, a.ID())
+					// deliver a short confirmation next snapshot (presentation-only)
+					r.pendingEvents[a.ID()] = "You exit the dungeon."
+				}
+			}
+		}
 		r.world.SetPosition(a.ID(), newPos)
 	}
 
@@ -235,10 +275,15 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
     // Deliver any pending one-shot event (e.g. forced-eject) to the next snapshot.
     // Do this before mode branching so events set during TickOnce() are seen
     // even if the agent's dungeon binding was removed earlier in the tick.
-    if ev, ok := r.pendingEvents[a.ID()]; ok {
-        snap.Event = ev
-        delete(r.pendingEvents, a.ID())
-    }
+	if ev, ok := r.pendingEvents[a.ID()]; ok {
+		snap.Event = ev
+		delete(r.pendingEvents, a.ID())
+	}
+	if er, ok := r.pendingEjects[a.ID()]; ok {
+		snap.Ejected = true
+		snap.EjectReason = er
+		delete(r.pendingEjects, a.ID())
+	}
 	// Do NOT populate snap.Known here. Known is the agent's interpretation
 	// (belief) and must be maintained by the agent's Memory. Runtime reports
 	// only current visibility in Snapshot.Visible.
@@ -327,6 +372,37 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			labels := []string{"STABLE", "UNSTABLE", "DANGEROUS", "CRITICAL"}
 			if band >= 0 && band < len(labels) {
 				snap.Dungeon.InstabilityLabel = labels[band]
+			}
+
+			// Provide presentation-only action cost hints and blocked-action reasons
+			snap.Dungeon.ActionCosts = map[string]int{}
+			if band == 1 {
+				snap.Dungeon.ActionCosts["observe"] = 1
+			}
+			if band == 3 {
+				snap.Dungeon.ActionCosts["move"] = 1
+			}
+			// WAIT behavior in Dangerous band: no restore
+			if band == 2 {
+				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "wait:norest")
+			}
+			// EXIT: only permitted at exit tile; also in CRITICAL requires at least 1 energy
+			if !snap.Dungeon.AtExit {
+				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:not_at_exit")
+			} else {
+				// check agent energy
+				energy := agent.MaxEnergy
+				switch at := a.(type) {
+				case *agent.RemoteHuman:
+					energy = at.Energy()
+				case *agent.Human:
+					energy = at.Energy()
+				case *agent.Scripted:
+					energy = at.Energy()
+				}
+				if band >= 3 && energy < 1 {
+					snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:exhausted")
+				}
 			}
 		// One-shot narration events per band
 		if _, ok := r.dungeonNarration[a.ID()]; !ok {
