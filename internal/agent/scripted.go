@@ -313,14 +313,30 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		final = WAIT
 	}
 
-	// Apply energy effects after final action selection
+	// Apply energy effects after final action selection, modified by
+	// dungeon-instability when present in the snapshot.
+	extraMove := 0
+	extraObserve := 0
+	waitRestore := WaitEnergyRestore
+	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
+		d := dv.DungeonValue()
+		if d.InstabilityBand == 1 {
+			extraObserve = 1
+		}
+		if d.InstabilityBand == 2 {
+			waitRestore = 0
+		}
+		if d.InstabilityBand >= 3 {
+			extraMove = 1
+		}
+	}
 	switch final {
 	case MOVE_N, MOVE_S, MOVE_E, MOVE_W:
-		s.energy -= MoveEnergyCost
+		s.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
-		s.energy -= ObserveEnergyCost
+		s.energy -= (ObserveEnergyCost + extraObserve)
 	case WAIT:
-		s.energy += WaitEnergyRestore
+		s.energy += waitRestore
 	}
 	if s.energy > MaxEnergy {
 		s.energy = MaxEnergy

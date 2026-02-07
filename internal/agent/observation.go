@@ -67,6 +67,13 @@ type DungeonView struct {
 	InstabilityLabel string            `json:"instability_label,omitempty"`
 	DecayedTiles     []core.Position   `json:"decayed_tiles,omitempty"`
 	DistortionActive bool              `json:"distortion_active,omitempty"`
+	// ActionCosts reports per-action extra costs (positive ints) imposed by
+	// environmental effects (e.g. UNSTABLE adds +1 to OBSERVE). Keys are
+	// simple labels: "observe", "move".
+	ActionCosts map[string]int `json:"action_costs,omitempty"`
+	// BlockedActions lists short reasons why certain actions are not
+	// currently possible (presentation hints only). Examples: "exit:exhausted".
+	BlockedActions []string `json:"blocked_actions,omitempty"`
 
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
 	ExitState    string `json:"exit_state,omitempty"`

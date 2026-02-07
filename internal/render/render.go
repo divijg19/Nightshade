@@ -236,6 +236,27 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 			if obs.Dungeon.DistortionActive {
 				narration = append(narration, "Your sense of direction warps for a moment.")
 			}
+			// Present action-cost hints derived from server-provided metadata.
+			if len(obs.Dungeon.ActionCosts) > 0 {
+				if v, ok := obs.Dungeon.ActionCosts["observe"]; ok && v > 0 {
+					narration = append(narration, "OBSERVE costs more energy here.")
+				}
+				if v, ok := obs.Dungeon.ActionCosts["move"]; ok && v > 0 {
+					narration = append(narration, "Movement feels draining.")
+				}
+			}
+			for _, b := range obs.Dungeon.BlockedActions {
+				if b == "wait:norest" {
+					narration = append(narration, "No rest here.")
+				}
+				if b == "exit:exhausted" {
+					narration = append(narration, "You are too exhausted to exit.")
+				}
+				if b == "exit:not_at_exit" {
+					// subtle hint only
+					narration = append(narration, "You must reach the exit to leave.")
+				}
+			}
 			// One-shot server events (e.g., eject) will be appended globally below.
 		}
 	} else if !opts.Minimal && len(obs.Presence) > 0 {

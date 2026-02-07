@@ -73,6 +73,34 @@ func (d *Instance) Tick() {
 	}
 }
 
+// TickWithAnchor advances the dungeon tick with awareness of whether the
+// occupying agent is standing on the anchor tile. When `atAnchor` is true
+// pressure increases only every 2 authoritative ticks (deterministic).
+func (d *Instance) TickWithAnchor(atAnchor bool, globalTick int) {
+	if atAnchor {
+		if globalTick%2 == 0 {
+			d.Pressure++
+			// apply decay same as normal Tick when pressure advances
+			if d.Pressure >= 6 {
+				for y := 1; y < d.Height-1; y++ {
+					for x := 1; x < d.Width-1; x++ {
+						p := core.Position{X: x, Y: y}
+						if _, ok := d.Decayed[p]; ok {
+							continue
+						}
+						if (x+y+d.Pressure)%4 == 0 {
+							d.Decayed[p] = true
+						}
+					}
+				}
+			}
+		}
+		return
+	}
+	// default behavior
+	d.Tick()
+}
+
 // InstabilityBand deterministically classifies the dungeon state from pressure.
 // Bands:
 // 0: 0-5 (Stable)

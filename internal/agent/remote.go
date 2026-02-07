@@ -144,14 +144,32 @@ func (r *RemoteHuman) DecideWithInput(snapshot Snapshot, input string) Action {
 		final = WAIT
 	}
 
-	// 10. Apply energy effects
+	// 10. Apply energy effects with dungeon band modifiers (presentation
+	// hints come from snapshot.Dungeon; enforce costs here deterministically)
+	// Determine band-based modifiers if a DungeonView is present.
+	extraMove := 0
+	extraObserve := 0
+	waitRestore := WaitEnergyRestore
+	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
+		d := dv.DungeonValue()
+		if d.InstabilityBand == 1 {
+			extraObserve = 1
+		}
+		if d.InstabilityBand == 2 {
+			waitRestore = 0
+		}
+		if d.InstabilityBand >= 3 {
+			extraMove = 1
+		}
+	}
+
 	switch final {
 	case MOVE_N, MOVE_S, MOVE_E, MOVE_W:
-		r.energy -= MoveEnergyCost
+		r.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
-		r.energy -= ObserveEnergyCost
+		r.energy -= (ObserveEnergyCost + extraObserve)
 	case WAIT:
-		r.energy += WaitEnergyRestore
+		r.energy += waitRestore
 	}
 	if r.energy > MaxEnergy {
 		r.energy = MaxEnergy
