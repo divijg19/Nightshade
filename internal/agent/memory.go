@@ -5,9 +5,10 @@ import "github.com/divijg19/Nightshade/internal/core"
 // MemoryTile represents a remembered tile and the tick when it was last
 // observed. This type lives in the agent layer and imports only internal/core.
 type MemoryTile struct {
-	Tile      core.TileView
-	LastSeen  int
-	ScarLevel int
+	Tile       core.TileView
+	LastSeen   int
+	ScarLevel  int
+	ScarSource string
 }
 
 // Memory stores last-known tiles keyed by position. Memory imports only
@@ -43,8 +44,8 @@ func (m *Memory) UpdateFromVisible(obs interface{}) map[core.Position]MemoryTile
 		for _, tv := range v.VisibleTiles() {
 			if old, ok := m.tiles[tv.Position]; ok {
 				prev[tv.Position] = old
-				// Preserve scar level when updating from a currently visible tile.
-				m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick, ScarLevel: old.ScarLevel}
+				// Preserve scar metadata when updating from a currently visible tile.
+				m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick, ScarLevel: old.ScarLevel, ScarSource: old.ScarSource}
 			} else {
 				prev[tv.Position] = MemoryTile{LastSeen: -1}
 				m.tiles[tv.Position] = MemoryTile{Tile: tv, LastSeen: tick}

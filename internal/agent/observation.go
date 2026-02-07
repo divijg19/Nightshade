@@ -63,6 +63,11 @@ type DungeonView struct {
 	Tick            int      `json:"tick"`
 	InstabilityBand int      `json:"instability_band"`
 
+	// InstabilityLabel is a human-friendly band label (STABLE/UNSTABLE/DANGEROUS/CRITICAL)
+	InstabilityLabel string            `json:"instability_label,omitempty"`
+	DecayedTiles     []core.Position   `json:"decayed_tiles,omitempty"`
+	DistortionActive bool              `json:"distortion_active,omitempty"`
+
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
 	ExitState    string `json:"exit_state,omitempty"`
 	// Event is a one-shot narration string (populated by server)

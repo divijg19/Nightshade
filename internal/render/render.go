@@ -232,9 +232,19 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 			case 3:
 				narration = append(narration, "The dungeon is close to collapse.")
 			}
+			// Distortion narration when navigation is actively distorted.
+			if obs.Dungeon.DistortionActive {
+				narration = append(narration, "Your sense of direction warps for a moment.")
+			}
+			// One-shot server events (e.g., eject) will be appended globally below.
 		}
 	} else if !opts.Minimal && len(obs.Presence) > 0 {
 		narration = append(narration, "You sense presences nearby.")
+	}
+
+	// Global one-shot event (deliver for any mode)
+	if obs.Event != "" {
+		narration = append(narration, obs.Event)
 	}
 
 	// HUD (compact)

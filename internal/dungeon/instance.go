@@ -31,6 +31,9 @@ type Instance struct {
 
 	Done       bool
 	DoneReason string
+
+	// Decayed tracks tiles that have permanently decayed during the dungeon lifetime.
+	Decayed map[core.Position]bool
 }
 
 func NewInstance(id string, anchor AnchorType) *Instance {
@@ -45,6 +48,7 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		Anchor:        core.Position{X: 3, Y: 3},
 		Exit:          core.Position{X: 3, Y: 0},
 		AnchorType:    anchor,
+		Decayed:       make(map[core.Position]bool),
 	}
 }
 
@@ -52,6 +56,21 @@ func (d *Instance) Tick() {
 	// v0.3.0 authoritative step: pressure is visible but has no gameplay effects yet.
 	// Deterministic: increments by exactly +1 per tick while the agent is inside.
 	d.Pressure++
+
+	// v0.3.2: apply deterministic tile decay when pressure reaches unstable band (>=6).
+	if d.Pressure >= 6 {
+		for y := 1; y < d.Height-1; y++ {
+			for x := 1; x < d.Width-1; x++ {
+				p := core.Position{X: x, Y: y}
+				if _, ok := d.Decayed[p]; ok {
+					continue
+				}
+				if (x+y+d.Pressure)%4 == 0 {
+					d.Decayed[p] = true
+				}
+			}
+		}
+	}
 }
 
 // InstabilityBand deterministically classifies the dungeon state from pressure.
@@ -96,6 +115,10 @@ func (d *Instance) GlyphAt(p core.Position) rune {
 
 	if p == d.Anchor {
 		return 'A'
+	}
+	// If tile decayed, show persistent '~' floor.
+	if d.Decayed[p] {
+		return '~'
 	}
 	return '.'
 }
