@@ -35,6 +35,17 @@ func (h *Human) ID() string      { return h.id }
 func (h *Human) Memory() *Memory { return h.memory }
 func (h *Human) Energy() int     { return h.energy }
 
+// AdjustEnergy adjusts the human's energy by delta and clamps to allowed range.
+func (h *Human) AdjustEnergy(delta int) {
+	h.energy += delta
+	if h.energy > MaxEnergy {
+		h.energy = MaxEnergy
+	}
+	if h.energy < MinEnergy {
+		h.energy = MinEnergy
+	}
+}
+
 // visibility radius must match the runtime default (kept as literal to
 // avoid touching runtime package). This mirrors runtime.defaultVisibilityRadius.
 const humanVisibilityRadius = 2
