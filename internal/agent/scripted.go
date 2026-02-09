@@ -394,6 +394,17 @@ func (s *Scripted) EmitBeliefs(snapshot Snapshot) {
 // Energy returns the current energy level for debug/inspection.
 func (s *Scripted) Energy() int { return s.energy }
 
+// AdjustEnergy adjusts scripted agent's energy by delta and clamps.
+func (s *Scripted) AdjustEnergy(delta int) {
+	s.energy += delta
+	if s.energy > MaxEnergy {
+		s.energy = MaxEnergy
+	}
+	if s.energy < MinEnergy {
+		s.energy = MinEnergy
+	}
+}
+
 // Oscillating moves north on even ticks and south on odd ticks.
 type Oscillating struct {
 	id     string

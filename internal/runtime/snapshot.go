@@ -28,6 +28,7 @@ type Snapshot struct {
 	EjectReason string
 }
 
+
 func (s Snapshot) KnownTiles() []core.TileView {
 	// Keep this for backward compatibility: Runtime no longer fabricates
 	// Known; agents should treat Snapshot.Known as empty and rely on their

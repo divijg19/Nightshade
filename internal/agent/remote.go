@@ -49,6 +49,17 @@ func (r *RemoteHuman) IDBase64() string {
 func (r *RemoteHuman) Memory() *Memory { return r.memory }
 func (r *RemoteHuman) Energy() int     { return r.energy }
 
+// AdjustEnergy adjusts the agent's energy by delta and clamps to allowed range.
+func (r *RemoteHuman) AdjustEnergy(delta int) {
+	r.energy += delta
+	if r.energy > MaxEnergy {
+		r.energy = MaxEnergy
+	}
+	if r.energy < MinEnergy {
+		r.energy = MinEnergy
+	}
+}
+
 // SetConnected marks whether a client is currently attached to this RemoteHuman.
 // This is used by the server to indicate that TickOnce should block waiting
 // for inputs for this agent.

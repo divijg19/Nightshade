@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"testing"
 
 	"strings"
@@ -17,6 +18,9 @@ func TestRender_ClearsScreen(t *testing.T) {
 		Position: core.Position{X: 0, Y: 0},
 	}
 	out := RenderForTest(obs)
+	fmt.Println("--- RENDER OUTPUT START ---")
+	fmt.Println(out)
+	fmt.Println("--- RENDER OUTPUT END ---")
 	if out == "" {
 		t.Fatalf("render output empty")
 	}
@@ -216,7 +220,9 @@ func TestDungeonGrid_SubstitutionDeterministic(t *testing.T) {
 
 	obs := agent.Observation{
 		Tick:     0,
-		Position: core.Position{X: 0, Y: 0},
+		// position outside the small test grid so player glyph doesn't mask
+		// deterministic substitution expectations
+		Position: core.Position{X: 100, Y: 100},
 		Mode:     "dungeon",
 		Dungeon: &agent.DungeonView{
 			Grid:            grid,

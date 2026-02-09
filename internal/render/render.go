@@ -85,12 +85,31 @@ func RenderGrid(obs agent.Observation) []string {
 		lines = append(lines, strings.Repeat("-", 7))
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
+            // build enemy lookup map for overlay
+            enemyMap := map[core.Position]agent.EnemyView{}
+            if obs.Dungeon != nil {
+                for _, ev := range obs.Dungeon.Enemies {
+                    enemyMap[ev.Pos] = ev
+                }
+            }
 			for y, row := range obs.Dungeon.Grid {
-				out := make([]rune, len(row))
+				var b strings.Builder
 				for x, ch := range row {
-					out[x] = applyInstabilityGlyph(ch, band, x, y, obs.Tick)
+					pos := core.Position{X: x, Y: y}
+					g := applyInstabilityGlyph(ch, band, x, y, obs.Tick)
+					// center is player
+					if x == int(obs.Position.X) && y == int(obs.Position.Y) {
+						b.WriteString(ANSIWhiteBright + "@" + ANSIReset)
+						continue
+					}
+					if ev, ok := enemyMap[pos]; ok {
+						// render dim/red 'w'
+						b.WriteString(ANSIRedBright + string(ev.Glyph) + ANSIReset)
+						continue
+					}
+					b.WriteRune(g)
 				}
-				lines = append(lines, string(out))
+				lines = append(lines, b.String())
 			}
 		} else {
 			lines = append(lines, "(no grid)")
@@ -276,7 +295,15 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 		energyStr = color("1;33", energyStr)
 	}
 	hud = append(hud, fmt.Sprintf("%s%s", hudLabel, energyStr))
+	// Append threat line for dungeon mode when present
 	hud = append(hud, fmt.Sprintf("P %d  S %d  Beliefs %d", paranoia, scars, len(obs.Known)))
+	if obs.Mode == "dungeon" && obs.Dungeon != nil {
+		th := obs.Dungeon.Threat
+		if th == "" {
+			th = "LOW"
+		}
+		hud = append(hud, fmt.Sprintf("THREAT: %s", th))
+	}
 
 	statusLines := splitStatusLines(status)
 

@@ -74,6 +74,10 @@ type DungeonView struct {
 	// BlockedActions lists short reasons why certain actions are not
 	// currently possible (presentation hints only). Examples: "exit:exhausted".
 	BlockedActions []string `json:"blocked_actions,omitempty"`
+	// Enemies is a presentation-only list of visible enemies in the dungeon.
+	Enemies        []EnemyView `json:"enemies,omitempty"`
+	// Threat is a short label: LOW / MEDIUM / HIGH
+	Threat         string      `json:"threat,omitempty"`
 
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
 	ExitState    string `json:"exit_state,omitempty"`
@@ -101,4 +105,11 @@ const (
 type PresenceCue struct {
 	Type     PresenceType  `json:"type"`
 	Position core.Position `json:"position"`
+}
+
+// EnemyView is a minimal presentation view of a hostile entity.
+type EnemyView struct {
+	Pos    core.Position `json:"pos,omitempty"`
+	Threat string        `json:"threat,omitempty"`
+	Glyph  rune          `json:"glyph,omitempty"`
 }

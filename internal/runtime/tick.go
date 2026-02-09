@@ -7,6 +7,7 @@ import (
 	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/dungeon"
 	"github.com/divijg19/Nightshade/internal/game"
+	"github.com/divijg19/Nightshade/internal/util"
 )
 
 type Decisions map[string]agent.Action
@@ -18,15 +19,147 @@ func (r *Runtime) TickOnce() Decisions {
 		r.board.Tick()
 	}
 	// v0.3.0 pressure loop: advance dungeon pressure before snapshots.
+	// Advance each unique dungeon instance once. Collect mapping of instance->agentIDs
+	instAgents := map[*dungeon.Instance][]string{}
+	instAgentPositions := map[*dungeon.Instance]map[string]core.Position{}
 	for _, a := range r.agents {
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
-			// When an agent is standing on the anchor tile, pressure gain
-			// is reduced: +1 every 2 authoritative ticks. Determine whether
-			// the agent is on anchor by comparing runtime world position.
+			instAgents[d] = append(instAgents[d], a.ID())
+			if instAgentPositions[d] == nil {
+				instAgentPositions[d] = map[string]core.Position{}
+			}
 			wpos, _ := r.world.PositionOf(a.ID())
-			pos := core.Position{X: wpos.X, Y: wpos.Y}
-			atAnchor := pos == d.Anchor
-			d.TickWithAnchor(atAnchor, r.tick)
+			instAgentPositions[d][a.ID()] = core.Position{X: wpos.X, Y: wpos.Y}
+		}
+	}
+	for inst, agentIDs := range instAgents {
+		// Determine if any occupying agent stands on the anchor
+		atAnchor := false
+		for _, aid := range agentIDs {
+			if p, ok := instAgentPositions[inst][aid]; ok {
+				if p == inst.Anchor {
+					atAnchor = true
+					break
+				}
+			}
+		}
+		inst.TickWithAnchor(atAnchor, r.tick)
+
+		// Entity pipeline: perception -> movement -> effects (one action per tick)
+		// Only run entities if instance still has agents bound.
+		if len(agentIDs) == 0 {
+			continue
+		}
+		// Perception: increase aggro for entities near any player
+		for i := range inst.Entities {
+			e := &inst.Entities[i]
+			nearest := 999
+			for _, aid := range agentIDs {
+				if pos, ok := instAgentPositions[inst][aid]; ok {
+					d := e.Pos
+					dist := util.IntAbs(d.X-pos.X) + util.IntAbs(d.Y-pos.Y)
+					if dist < nearest {
+						nearest = dist
+					}
+				}
+			}
+			if nearest <= 3 {
+				e.Aggro += 1
+			}
+		}
+		// Movement: wraiths move every 2 ticks toward nearest player
+		if r.tick%2 == 0 {
+			for i := range inst.Entities {
+				e := &inst.Entities[i]
+				// find nearest player
+				nearest := 999
+				var target core.Position
+				for _, aid := range agentIDs {
+					if pos, ok := instAgentPositions[inst][aid]; ok {
+						dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
+						if dist < nearest {
+							nearest = dist
+							target = pos
+						}
+					}
+				}
+				// Move one Manhattan step toward target (prefer X then Y)
+				if nearest > 0 && nearest < 999 {
+					dx := target.X - e.Pos.X
+					if dx != 0 {
+						if dx > 0 {
+							e.Pos.X++
+						} else {
+							e.Pos.X--
+						}
+					} else {
+						dy := target.Y - e.Pos.Y
+						if dy > 0 {
+							e.Pos.Y++
+						} else if dy < 0 {
+							e.Pos.Y--
+						}
+					}
+					// clamp inside inner bounds
+					if e.Pos.X < 1 {
+						e.Pos.X = 1
+					}
+					if e.Pos.Y < 1 {
+						e.Pos.Y = 1
+					}
+					if e.Pos.X > inst.Width-2 {
+						e.Pos.X = inst.Width - 2
+					}
+					if e.Pos.Y > inst.Height-2 {
+						e.Pos.Y = inst.Height - 2
+					}
+				}
+			}
+		}
+		// Effects: if any entity adjacent to a player, apply energy -=2
+		for i := range inst.Entities {
+			e := &inst.Entities[i]
+			for _, aid := range agentIDs {
+				if pos, ok := instAgentPositions[inst][aid]; ok {
+					dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
+					if dist == 1 {
+						// apply energy penalty to agent
+						for _, a := range r.agents {
+							if a.ID() != aid {
+								continue
+							}
+							switch at := a.(type) {
+							case *agent.RemoteHuman:
+								at.AdjustEnergy(-2)
+							case *agent.Human:
+								at.AdjustEnergy(-2)
+							case *agent.Scripted:
+								at.AdjustEnergy(-2)
+							}
+							// If agent energy <= 0, force eject collapse
+							var energy int
+							switch at := a.(type) {
+							case *agent.RemoteHuman:
+								energy = at.Energy()
+							case *agent.Human:
+								energy = at.Energy()
+							case *agent.Scripted:
+								energy = at.Energy()
+							}
+							if energy <= 0 {
+								// schedule forced eject collapse
+								if r.board != nil {
+									// remove bindings
+									delete(r.signalByAgent, aid)
+								}
+								delete(r.dungeonByAgent, aid)
+								r.pendingEvents[aid] = "You collapse and are expelled."
+								r.pendingEjects[aid] = "collapse"
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -144,6 +277,35 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		}
 
+		// HIDE handling: server-authoritative enforcement and effects.
+		if action == agent.HIDE {
+			if d, ok := r.dungeonByAgent[a.ID()]; ok {
+				// cannot hide in CRITICAL band
+				if d.InstabilityBand() >= 3 {
+					action = agent.WAIT
+				} else {
+					// consume 1 energy and reduce aggro deterministically
+					switch at := a.(type) {
+					case *agent.RemoteHuman:
+						at.AdjustEnergy(-1)
+					case *agent.Human:
+						at.AdjustEnergy(-1)
+					case *agent.Scripted:
+						at.AdjustEnergy(-1)
+					}
+					for i := range d.Entities {
+						d.Entities[i].Aggro -= 1
+						if d.Entities[i].Aggro < 0 {
+							d.Entities[i].Aggro = 0
+						}
+					}
+				}
+			} else {
+				// HIDE outside dungeon is a no-op (treat as WAIT)
+				action = agent.WAIT
+			}
+		}
+
 		newPos := game.ResolveMovement(
 			pos,
 			action,
@@ -234,6 +396,8 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	}
 
 	inst := dungeon.NewInstance("D-"+signalID, dungeon.AnchorType(string(s.Anchor)))
+	// seed deterministic default entities
+	inst.AddDefaultEntities()
 	r.dungeonByAgent[agentID] = inst
 	r.signalByAgent[agentID] = signalID
 	return true
@@ -379,6 +543,50 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			if band == 1 {
 				snap.Dungeon.ActionCosts["observe"] = 1
 			}
+
+			// Populate visible enemies and compute threat level.
+			visMap := map[core.Position]struct{}{}
+			for _, tv := range snap.Visible {
+				visMap[tv.Position] = struct{}{}
+			}
+			maxAgg := 0
+			nearest := 999
+			for _, e := range d.Entities {
+				if e.Aggro > maxAgg {
+					maxAgg = e.Aggro
+				}
+				dist := util.IntAbs(e.Pos.X-snap.Position.X) + util.IntAbs(e.Pos.Y-snap.Position.Y)
+				if dist < nearest {
+					nearest = dist
+				}
+				// Only include enemy in view if visible to agent
+				if _, ok := visMap[e.Pos]; ok {
+					snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Pos: e.Pos, Threat: "", Glyph: 'w'})
+				}
+			}
+			// threatScore: combine nearest distance (inverse), maxAggro, instability band
+			distScore := 0
+			if nearest < 999 {
+				if nearest <= 0 {
+					distScore = 3
+				} else {
+					distScore = 4 - nearest
+				}
+			}
+			score := distScore
+			if maxAgg > score {
+				score = maxAgg
+			}
+			if band > score {
+				score = band
+			}
+			if score <= 1 {
+				snap.Dungeon.Threat = "LOW"
+			} else if score == 2 {
+				snap.Dungeon.Threat = "MEDIUM"
+			} else {
+				snap.Dungeon.Threat = "HIGH"
+			}
 			if band == 3 {
 				snap.Dungeon.ActionCosts["move"] = 1
 			}
@@ -403,6 +611,10 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				if band >= 3 && energy < 1 {
 					snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:exhausted")
 				}
+			}
+			// HIDE is disabled in CRITICAL band
+			if band >= 3 {
+				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "hide:disabled")
 			}
 		// One-shot narration events per band
 		if _, ok := r.dungeonNarration[a.ID()]; !ok {

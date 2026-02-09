@@ -34,6 +34,24 @@ type Instance struct {
 
 	// Decayed tracks tiles that have permanently decayed during the dungeon lifetime.
 	Decayed map[core.Position]bool
+	// Entities present in this dungeon instance (hostile, reactive)
+	Entities []Entity
+}
+
+// EntityKind enumerates minimal enemy types.
+type EntityKind string
+
+const (
+	EntityWraith EntityKind = "WRAITH"
+)
+
+// Entity is a minimal, deterministic hostile presence living inside
+// a dungeon instance.
+type Entity struct {
+	ID    string
+	Pos   core.Position
+	Kind  EntityKind
+	Aggro int
 }
 
 func NewInstance(id string, anchor AnchorType) *Instance {
@@ -49,7 +67,21 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		Exit:          core.Position{X: 3, Y: 0},
 		AnchorType:    anchor,
 		Decayed:       make(map[core.Position]bool),
+		Entities:      []Entity{},
 	}
+}
+
+// AddDefaultEntities seeds the dungeon with the canonical single WRAITH.
+// This deterministic placement puts the WRAITH at the anchor if free,
+// otherwise adjacent above the anchor.
+func (d *Instance) AddDefaultEntities() {
+	pos := d.Anchor
+	// prefer anchor, otherwise tile above
+	if pos.Y-1 >= 0 {
+		pos = core.Position{X: d.Anchor.X, Y: d.Anchor.Y - 1}
+	}
+	e := Entity{ID: "w-0", Pos: pos, Kind: EntityWraith, Aggro: 0}
+	d.Entities = append(d.Entities, e)
 }
 
 func (d *Instance) Tick() {
