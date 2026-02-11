@@ -647,17 +647,17 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			AtExit:        snap.Position == d.Exit,
 		}
 
-		// Populate decayed tiles slice for presentation and report distortion state.
-		decayed := make([]core.Position, 0, len(d.Decayed))
-		for p := range d.Decayed {
-			decayed = append(decayed, p)
-		}
-		snap.Dungeon.DecayedTiles = decayed
-		snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
-		labels := []string{"Stable", "Unstable", "Dangerous", "Critical"}
-		if band >= 0 && band < len(labels) {
-			snap.Dungeon.InstabilityLabel = labels[band]
-		}
+			// Populate decayed tiles slice for presentation and report distortion state.
+			decayed := make([]core.Position, 0, len(d.Decayed))
+			for p := range d.Decayed {
+				decayed = append(decayed, p)
+			}
+			snap.Dungeon.DecayedTiles = decayed
+			snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
+			labels := []string{"STABLE", "UNSTABLE", "DANGEROUS", "CRITICAL"}
+			if band >= 0 && band < len(labels) {
+				snap.Dungeon.InstabilityLabel = labels[band]
+			}
 
 		// Provide presentation-only action cost hints and blocked-action reasons
 		snap.Dungeon.ActionCosts = map[string]int{}
