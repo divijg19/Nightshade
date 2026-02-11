@@ -113,4 +113,6 @@ type EnemyView struct {
 	X      int    `json:"x,omitempty"`
 	Y      int    `json:"y,omitempty"`
 	Target string `json:"target,omitempty"` // "player" | "anchor" | "exit" | "unknown"
+	// TargetLocked indicates whether the enemy currently has an active lock
+	TargetLocked bool `json:"target_locked,omitempty"`
 }

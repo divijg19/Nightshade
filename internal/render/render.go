@@ -112,8 +112,20 @@ func RenderGrid(obs agent.Observation) []string {
 						continue
 					}
 					if _, ok := enemyMap[pos]; ok {
-						// render dim/red 'w' (glyph fixed)
-						b.WriteString(ANSIRedBright + "w" + ANSIReset)
+						// render archetype glyphs/colors
+						ev := enemyMap[pos]
+						switch ev.Kind {
+						case "HUNTER":
+							b.WriteString(ANSIRedBright + "w" + ANSIReset)
+						case "SENTINEL":
+							b.WriteString(ANSIYellow + "S" + ANSIReset)
+						case "WARDEN":
+							b.WriteString(ANSIRedBright + "W" + ANSIReset)
+						case "SHADE":
+							b.WriteString(ANSIMagentaDim + "s" + ANSIReset)
+						default:
+							b.WriteString(ANSIRedBright + "w" + ANSIReset)
+						}
 						continue
 					}
 					// v0.3.5: subtle cue when an enemy is distracted toward anchor/exit.
@@ -323,10 +335,10 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 		hud = append(hud, fmt.Sprintf("THREAT: %s", th))
 	}
 
-	// HUD cue: enemy locked onto you when any visible enemy targets player
+	// HUD cue: enemy locked onto you when any visible enemy has an active lock
 	if obs.Mode == "dungeon" && obs.Dungeon != nil {
 		for _, ev := range obs.Dungeon.Enemies {
-			if ev.Target == "player" {
+			if ev.TargetLocked {
 				hud = append(hud, "Enemy locked onto you")
 				break
 			}

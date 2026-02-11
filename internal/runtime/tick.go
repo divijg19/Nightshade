@@ -79,6 +79,14 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 			}
 
+			// Lock timing: decrement TargetLocked lock ticks at tick start
+			if e.LockTicks > 0 {
+				e.LockTicks--
+				if e.LockTicks == 0 {
+					e.TargetLocked = false
+				}
+			}
+
 			// Determine nearest visible player (distance-based visibility).
 			nearestVisible := 999
 			var nearestVisiblePos core.Position
@@ -103,10 +111,26 @@ func (r *Runtime) TickOnce() Decisions {
 			if nearestAny <= 3 {
 				e.Aggro += 1
 			}
-			// Update last-known when a player is visible.
+            // Update last-known when a player is visible.
 			if nearestVisible != 999 {
 				e.LastKnown = nearestVisiblePos
 				e.HasLastKnown = true
+			}
+
+			// Archetype-specific behavior: Sentinels lock, Wardens move on cadence,
+			// Shades only move in Dangerous+ and phase through walls.
+			switch e.Kind {
+			case dungeon.EntityKind("SENTINEL"):
+				// if player within 2, lock onto player for 3 ticks
+				if nearestAny <= 2 && !e.TargetLocked {
+					e.TargetLocked = true
+					e.LockTicks = 3
+				}
+			case dungeon.EntityKind("WARDEN"):
+				// Wardens move only on even ticks; last-move tracking prevents extra moves
+				// handled below in movement cadence check.
+			case dungeon.EntityKind("SHADE"):
+				// Shades will only move when dungeon is Dangerous+; movement check below
 			}
 
 			// Choose target by override or default priority.
@@ -122,12 +146,23 @@ func (r *Runtime) TickOnce() Decisions {
 					target = inst.Exit
 				}
 			} else {
+				// If TargetLocked, prioritize player target
+				if e.TargetLocked {
+					if nearestVisible != 999 {
+						target = nearestVisiblePos
+					} else if e.HasLastKnown {
+						target = e.LastKnown
+					} else {
+						target = inst.Anchor
+					}
+				} else {
 				if nearestVisible != 999 {
 					target = nearestVisiblePos
 				} else if e.HasLastKnown {
 					target = e.LastKnown
 				} else {
 					target = inst.Anchor
+				}
 				}
 			}
 
@@ -136,13 +171,32 @@ func (r *Runtime) TickOnce() Decisions {
 				dx := target.X - e.Pos.X
 				dy := target.Y - e.Pos.Y
 				moved := false
+
+				// movement cadence/permission checks
+				allowMove := true
+				if e.Kind == dungeon.EntityKind("WARDEN") {
+					if r.tick%2 != 0 {
+						allowMove = false
+					}
+				}
+				if e.Kind == dungeon.EntityKind("SHADE") {
+					// Shades only move when dungeon Dangerous+ (band >= 2)
+					if inst.InstabilityBand() < 2 {
+						allowMove = false
+					}
+				}
+				if !allowMove {
+					// skip movement
+					continue
+				}
 				if dx != 0 {
 					step := 1
 					if dx < 0 {
 						step = -1
 					}
 					cand := core.Position{X: e.Pos.X + step, Y: e.Pos.Y}
-					if inst.InBounds(cand) && inst.GlyphAt(cand) != '#' {
+					// Shades phase through walls
+					if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
 						if _, occ := occupied[cand]; !occ {
 							e.Pos = cand
 							moved = true
@@ -155,7 +209,7 @@ func (r *Runtime) TickOnce() Decisions {
 						step = -1
 					}
 					cand := core.Position{X: e.Pos.X, Y: e.Pos.Y + step}
-					if inst.InBounds(cand) && inst.GlyphAt(cand) != '#' {
+					if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
 						if _, occ := occupied[cand]; !occ {
 							e.Pos = cand
 						}
@@ -169,7 +223,7 @@ func (r *Runtime) TickOnce() Decisions {
 			for _, aid := range agentIDs {
 				if pos, ok := instAgentPositions[inst][aid]; ok {
 					dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
-					if dist == 1 {
+						if dist == 1 {
 						// apply energy penalty to agent
 						for _, a := range r.agents {
 							if a.ID() != aid {
@@ -371,9 +425,19 @@ func (r *Runtime) TickOnce() Decisions {
 					// set to 2 because cooldowns decrement at tick start
 					r.hideCooldown[a.ID()] = 2
 					for i := range inst.Entities {
-						inst.Entities[i].TargetOverride = "unknown"
-						// +1 because overrides decrement at tick start.
-						inst.Entities[i].OverrideTicks = 2
+						e := &inst.Entities[i]
+						// Sentinels are immune to hide/distract.
+						if e.Kind == dungeon.EntityKind("SENTINEL") {
+							continue
+						}
+						// Hide breaks locks for Wardens/Shades
+						if e.Kind == dungeon.EntityKind("WARDEN") || e.Kind == dungeon.EntityKind("SHADE") {
+							e.TargetLocked = false
+							e.LockTicks = 0
+						}
+						e.TargetOverride = "unknown"
+						// overrides set for 2 ticks
+						e.OverrideTicks = 2
 					}
 					r.pendingEvents[a.ID()] = "You fade from immediate pursuit."
 				}
@@ -406,14 +470,20 @@ func (r *Runtime) TickOnce() Decisions {
 					}
 				}
 				if idx >= 0 {
-					if anchorVisible {
-						inst.Entities[idx].TargetOverride = "anchor"
+					e := &inst.Entities[idx]
+					// Sentinels/Wardens/Shades are immune to distract.
+					if e.Kind == dungeon.EntityKind("SENTINEL") || e.Kind == dungeon.EntityKind("WARDEN") || e.Kind == dungeon.EntityKind("SHADE") {
+						// no effect
 					} else {
-						inst.Entities[idx].TargetOverride = "exit"
+						if anchorVisible {
+							e.TargetOverride = "anchor"
+						} else {
+							e.TargetOverride = "exit"
+						}
+						// overrides set for 3 ticks
+						e.OverrideTicks = 3
+						r.pendingEvents[a.ID()] = "The presence shifts its attention."
 					}
-					// +1 because overrides decrement at tick start.
-					inst.Entities[idx].OverrideTicks = 3
-					r.pendingEvents[a.ID()] = "The presence shifts its attention."
 				}
 			}
 		}
@@ -707,9 +777,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				}
 			}
 			// Only include enemy in view if visible to agent
-			if _, ok := visMap[e.Pos]; ok {
-				snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Kind: string(e.Kind), X: e.Pos.X, Y: e.Pos.Y, Target: targetTag})
-			}
+				if _, ok := visMap[e.Pos]; ok {
+					snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Kind: string(e.Kind), X: e.Pos.X, Y: e.Pos.Y, Target: targetTag, TargetLocked: e.TargetLocked})
+				}
 		}
 		// threatScore: combine nearest distance (inverse), maxAggro, instability band
 		distScore := 0

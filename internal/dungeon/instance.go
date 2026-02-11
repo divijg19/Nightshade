@@ -42,7 +42,11 @@ type Instance struct {
 type EntityKind string
 
 const (
-	EntityWraith EntityKind = "WRAITH"
+	EntityWraith  EntityKind = "WRAITH"
+	EnemyHunter   EntityKind = "HUNTER"
+	EnemySentinel EntityKind = "SENTINEL"
+	EnemyWarden   EntityKind = "WARDEN"
+	EnemyShade    EntityKind = "SHADE"
 )
 
 // Entity is a minimal, deterministic hostile presence living inside
@@ -56,6 +60,12 @@ type Entity struct {
 	TargetOverride string
 	// OverrideTicks remaining for the override
 	OverrideTicks int
+	// TargetLocked is a separate lock state (e.g., Sentinel locks).
+	TargetLocked bool
+	// LockTicks remaining for TargetLocked
+	LockTicks int
+	// LastMoveTick is the last global tick when this entity moved
+	LastMoveTick int
 	// LastKnown player position (when player was last visible to this entity)
 	LastKnown    core.Position
 	HasLastKnown bool
@@ -82,13 +92,70 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 // This deterministic placement puts the WRAITH at the anchor if free,
 // otherwise adjacent above the anchor.
 func (d *Instance) AddDefaultEntities() {
+	// Seed canonical single Hunter for backward compatibility
 	pos := d.Anchor
-	// prefer anchor, otherwise tile above
 	if pos.Y-1 >= 0 {
 		pos = core.Position{X: d.Anchor.X, Y: d.Anchor.Y - 1}
 	}
-	e := Entity{ID: "w-0", Pos: pos, Kind: EntityWraith, Aggro: 0}
+	e := Entity{ID: "e-0", Pos: pos, Kind: EnemyHunter, Aggro: 0}
 	d.Entities = append(d.Entities, e)
+}
+
+// SeedEntitiesForSignal deterministically composes entity list based on
+// a simple hash of signalType and globalTick. It never uses RNG and
+// produces positions within inner bounds avoiding anchor and exit.
+func (d *Instance) SeedEntitiesForSignal(signalType string, globalTick int) {
+	d.Entities = []Entity{}
+	// simple seed: sum of bytes of signalType + globalTick
+	seed := 0
+	for i := 0; i < len(signalType); i++ {
+		seed += int(signalType[i])
+	}
+	seed += globalTick
+
+	// helper to produce a deterministic position
+	makePos := func(offset int) core.Position {
+		w := d.Width - 2
+		h := d.Height - 2
+		if w <= 0 {
+			w = 1
+		}
+		if h <= 0 {
+			h = 1
+		}
+		x := 1 + ((seed + offset*3) % w)
+		y := 1 + ((seed + offset*7) % h)
+		p := core.Position{X: x, Y: y}
+		// avoid anchor/exit
+		if p == d.Anchor || p == d.Exit {
+			p.X = (p.X % (d.Width - 2)) + 1
+			p.Y = (p.Y % (d.Height - 2)) + 1
+		}
+		return p
+	}
+
+	add := func(kind EntityKind, idOff int) {
+		p := makePos(idOff)
+		e := Entity{ID: fmt.Sprintf("%s-%d", string(kind), idOff), Pos: p, Kind: kind}
+		d.Entities = append(d.Entities, e)
+	}
+
+	switch signalType {
+	case "NULL":
+		add(EnemyHunter, 0)
+	case "FRACTURE":
+		add(EnemyHunter, 0)
+		add(EnemySentinel, 1)
+	case "MEMORY_VAULT":
+		add(EnemyWarden, 0)
+		add(EnemySentinel, 1)
+	case "RECOVERY_NODE":
+		add(EnemyHunter, 0)
+		add(EnemyShade, 1)
+	default:
+		// fallback: one hunter
+		add(EnemyHunter, 0)
+	}
 }
 
 func (d *Instance) Tick() {
