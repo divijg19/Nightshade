@@ -133,7 +133,12 @@ func (r *RemoteHuman) DecideWithInput(snapshot Snapshot, input string) Action {
 	obs := buildObservation(r.memory, snapshot, prev, r.energy, effectiveParanoia)
 
 	// 6. Translate provided input to intended Action
-	intended := keyToAction(input)
+	// Dungeon-only keys must be gated by the authoritative snapshot mode.
+	inDungeon := false
+	if vm, ok := snapshot.(interface{ ViewMode() string }); ok {
+		inDungeon = vm.ViewMode() == "dungeon"
+	}
+	intended := keyToActionContext(input, inDungeon)
 
 	// 8. Apply caution override
 	if intended == MOVE_N || intended == MOVE_S || intended == MOVE_E || intended == MOVE_W {
@@ -163,14 +168,14 @@ func (r *RemoteHuman) DecideWithInput(snapshot Snapshot, input string) Action {
 	waitRestore := WaitEnergyRestore
 	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
 		d := dv.DungeonValue()
-		if d.InstabilityBand == 1 {
+		if d.InstabilityBand >= 1 {
+			extraMove = 1
+		}
+		if d.InstabilityBand == 1 || d.InstabilityBand == 2 {
 			extraObserve = 1
 		}
-		if d.InstabilityBand == 2 {
+		if d.InstabilityBand >= 2 {
 			waitRestore = 0
-		}
-		if d.InstabilityBand >= 3 {
-			extraMove = 1
 		}
 	}
 
@@ -179,6 +184,11 @@ func (r *RemoteHuman) DecideWithInput(snapshot Snapshot, input string) Action {
 		r.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
 		r.energy -= (ObserveEnergyCost + extraObserve)
+	case HIDE:
+		// mirror server cost for UX consistency
+		r.energy -= 2
+	case DISTRACT:
+		r.energy -= 3
 	case WAIT:
 		r.energy += waitRestore
 	}

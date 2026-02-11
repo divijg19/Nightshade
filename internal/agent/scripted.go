@@ -335,6 +335,10 @@ func (s *Scripted) Decide(snapshot Snapshot) Action {
 		s.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
 		s.energy -= (ObserveEnergyCost + extraObserve)
+	case HIDE:
+		s.energy -= 2
+	case DISTRACT:
+		s.energy -= 3
 	case WAIT:
 		s.energy += waitRestore
 	}

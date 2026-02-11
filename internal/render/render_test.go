@@ -219,7 +219,7 @@ func TestDungeonGrid_SubstitutionDeterministic(t *testing.T) {
 	}
 
 	obs := agent.Observation{
-		Tick:     0,
+		Tick: 0,
 		// position outside the small test grid so player glyph doesn't mask
 		// deterministic substitution expectations
 		Position: core.Position{X: 100, Y: 100},

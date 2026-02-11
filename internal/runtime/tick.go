@@ -18,6 +18,17 @@ func (r *Runtime) TickOnce() Decisions {
 	if r.board != nil {
 		r.board.Tick()
 	}
+	// v0.3.5: decrement dungeon-action cooldowns (server-authoritative).
+	for aid, v := range r.hideCooldown {
+		if v > 0 {
+			r.hideCooldown[aid] = v - 1
+		}
+	}
+	for aid, v := range r.distractCooldown {
+		if v > 0 {
+			r.distractCooldown[aid] = v - 1
+		}
+	}
 	// v0.3.0 pressure loop: advance dungeon pressure before snapshots.
 	// Advance each unique dungeon instance once. Collect mapping of instance->agentIDs
 	instAgents := map[*dungeon.Instance][]string{}
@@ -50,68 +61,104 @@ func (r *Runtime) TickOnce() Decisions {
 		if len(agentIDs) == 0 {
 			continue
 		}
-		// Perception: increase aggro for entities near any player
-		for i := range inst.Entities {
-			e := &inst.Entities[i]
-			nearest := 999
-			for _, aid := range agentIDs {
-				if pos, ok := instAgentPositions[inst][aid]; ok {
-					d := e.Pos
-					dist := util.IntAbs(d.X-pos.X) + util.IntAbs(d.Y-pos.Y)
-					if dist < nearest {
-						nearest = dist
-					}
-				}
-			}
-			if nearest <= 3 {
-				e.Aggro += 1
+		// v0.3.5: Enemies act once per tick with deterministic targeting.
+		occupied := map[core.Position]struct{}{}
+		for _, aid := range agentIDs {
+			if p, ok := instAgentPositions[inst][aid]; ok {
+				occupied[p] = struct{}{}
 			}
 		}
-		// Movement: wraiths move every 2 ticks toward nearest player
-		if r.tick%2 == 0 {
-			for i := range inst.Entities {
-				e := &inst.Entities[i]
-				// find nearest player
-				nearest := 999
-				var target core.Position
-				for _, aid := range agentIDs {
-					if pos, ok := instAgentPositions[inst][aid]; ok {
-						dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
-						if dist < nearest {
-							nearest = dist
-							target = pos
+		for i := range inst.Entities {
+			e := &inst.Entities[i]
+
+			// Override timing: decrement at tick start so overrides last exactly N ticks.
+			if e.OverrideTicks > 0 {
+				e.OverrideTicks--
+				if e.OverrideTicks == 0 {
+					e.TargetOverride = ""
+				}
+			}
+
+			// Determine nearest visible player (distance-based visibility).
+			nearestVisible := 999
+			var nearestVisiblePos core.Position
+			nearestAny := 999
+			for _, aid := range agentIDs {
+				pos, ok := instAgentPositions[inst][aid]
+				if !ok {
+					continue
+				}
+				dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
+				if dist < nearestAny {
+					nearestAny = dist
+				}
+				if dist <= defaultVisibilityRadius {
+					if dist < nearestVisible {
+						nearestVisible = dist
+						nearestVisiblePos = pos
+					}
+				}
+			}
+			// Preserve prior deterministic aggro mechanic.
+			if nearestAny <= 3 {
+				e.Aggro += 1
+			}
+			// Update last-known when a player is visible.
+			if nearestVisible != 999 {
+				e.LastKnown = nearestVisiblePos
+				e.HasLastKnown = true
+			}
+
+			// Choose target by override or default priority.
+			halt := false
+			target := core.Position{}
+			if e.OverrideTicks > 0 && e.TargetOverride != "" {
+				switch e.TargetOverride {
+				case "unknown":
+					halt = true
+				case "anchor":
+					target = inst.Anchor
+				case "exit":
+					target = inst.Exit
+				}
+			} else {
+				if nearestVisible != 999 {
+					target = nearestVisiblePos
+				} else if e.HasLastKnown {
+					target = e.LastKnown
+				} else {
+					target = inst.Anchor
+				}
+			}
+
+			// Move one tile per tick, cardinal, cannot pass walls.
+			if !halt {
+				dx := target.X - e.Pos.X
+				dy := target.Y - e.Pos.Y
+				moved := false
+				if dx != 0 {
+					step := 1
+					if dx < 0 {
+						step = -1
+					}
+					cand := core.Position{X: e.Pos.X + step, Y: e.Pos.Y}
+					if inst.InBounds(cand) && inst.GlyphAt(cand) != '#' {
+						if _, occ := occupied[cand]; !occ {
+							e.Pos = cand
+							moved = true
 						}
 					}
 				}
-				// Move one Manhattan step toward target (prefer X then Y)
-				if nearest > 0 && nearest < 999 {
-					dx := target.X - e.Pos.X
-					if dx != 0 {
-						if dx > 0 {
-							e.Pos.X++
-						} else {
-							e.Pos.X--
+				if !moved && dy != 0 {
+					step := 1
+					if dy < 0 {
+						step = -1
+					}
+					cand := core.Position{X: e.Pos.X, Y: e.Pos.Y + step}
+					if inst.InBounds(cand) && inst.GlyphAt(cand) != '#' {
+						if _, occ := occupied[cand]; !occ {
+							e.Pos = cand
 						}
-					} else {
-						dy := target.Y - e.Pos.Y
-						if dy > 0 {
-							e.Pos.Y++
-						} else if dy < 0 {
-							e.Pos.Y--
-						}
-					}
-					// clamp inside inner bounds
-					if e.Pos.X < 1 {
-						e.Pos.X = 1
-					}
-					if e.Pos.Y < 1 {
-						e.Pos.Y = 1
-					}
-					if e.Pos.X > inst.Width-2 {
-						e.Pos.X = inst.Width - 2
-					}
-					if e.Pos.Y > inst.Height-2 {
-						e.Pos.Y = inst.Height - 2
 					}
 				}
 			}
@@ -252,63 +299,137 @@ func (r *Runtime) TickOnce() Decisions {
 		} else {
 			action = a.Decide(preSnap)
 		}
-		decisions[a.ID()] = action
+		authoritative := action
 
 		// 4. Resolution: apply movement results to world
 		pos, ok := r.world.PositionOf(a.ID())
 		if !ok {
 			continue
 		}
+
+		// v0.3.5: band-aware legality enforcement (server-authoritative).
+		inDungeon := false
+		band := 0
+		var inst *dungeon.Instance
+		if d, ok := r.dungeonByAgent[a.ID()]; ok {
+			inDungeon = true
+			band = d.InstabilityBand()
+			inst = d
+		}
+		if inDungeon {
+			// Action availability by instability band.
+			if band >= 3 {
+				if authoritative == agent.OBSERVE {
+					authoritative = agent.WAIT
+				}
+				if authoritative == agent.HIDE {
+					authoritative = agent.WAIT
+				}
+				if authoritative == agent.DISTRACT {
+					authoritative = agent.WAIT
+				}
+			}
+			if band >= 2 {
+				if authoritative == agent.DISTRACT {
+					authoritative = agent.WAIT
+				}
+			}
+		} else {
+			// Dungeon-only actions are invalid outside dungeons.
+			if authoritative == agent.HIDE || authoritative == agent.DISTRACT {
+				authoritative = agent.WAIT
+			}
+		}
 		// Apply navigation distortion if agent is inside a dungeon in Dangerous band
 		// and the authoritative tick meets distortion cadence (tick % 3 == 0).
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
 			if d.Pressure >= 11 && r.tick%3 == 0 {
 				// Only rotate real MOVE actions; OBSERVE/WAIT unaffected.
-				switch action {
+				switch authoritative {
 				case agent.MOVE_N:
-					action = agent.MOVE_E
+					authoritative = agent.MOVE_E
 				case agent.MOVE_E:
-					action = agent.MOVE_S
+					authoritative = agent.MOVE_S
 				case agent.MOVE_S:
-					action = agent.MOVE_W
+					authoritative = agent.MOVE_W
 				case agent.MOVE_W:
-					action = agent.MOVE_N
+					authoritative = agent.MOVE_N
+				}
+			}
+		}
+		// v0.3.5: HIDE (dungeon-only)
+		if authoritative == agent.HIDE {
+			if !inDungeon || inst == nil || band >= 3 {
+				authoritative = agent.WAIT
+			} else {
+				ap := core.Position{X: pos.X, Y: pos.Y}
+				if inst.GlyphAt(ap) == '#' {
+					authoritative = agent.WAIT
+				} else if r.hideCooldown[a.ID()] > 0 {
+					authoritative = agent.WAIT
+				} else {
+					// set to 2 because cooldowns decrement at tick start
+					r.hideCooldown[a.ID()] = 2
+					for i := range inst.Entities {
+						inst.Entities[i].TargetOverride = "unknown"
+						// +1 because overrides decrement at tick start.
+						inst.Entities[i].OverrideTicks = 2
+					}
+					r.pendingEvents[a.ID()] = "You fade from immediate pursuit."
+				}
+			}
+		}
+		// v0.3.5: DISTRACT (dungeon-only)
+		if authoritative == agent.DISTRACT {
+			if !inDungeon || inst == nil || band >= 2 {
+				authoritative = agent.WAIT
+			} else if len(inst.Entities) == 0 {
+				// fails silently
+				authoritative = agent.WAIT
+			} else {
+				anchorVisible := false
+				for _, tv := range preSnap.Visible {
+					if tv.Position == inst.Anchor {
+						anchorVisible = true
+						break
+					}
+				}
+				ap := core.Position{X: pos.X, Y: pos.Y}
+				nearest := 999
+				idx := -1
+				for i := range inst.Entities {
+					e := &inst.Entities[i]
+					dist := util.IntAbs(e.Pos.X-ap.X) + util.IntAbs(e.Pos.Y-ap.Y)
+					if dist < nearest {
+						nearest = dist
+						idx = i
+					}
+				}
+				if idx >= 0 {
+					if anchorVisible {
+						inst.Entities[idx].TargetOverride = "anchor"
+					} else {
+						inst.Entities[idx].TargetOverride = "exit"
+					}
+					// +1 because overrides decrement at tick start.
+					inst.Entities[idx].OverrideTicks = 3
+					r.pendingEvents[a.ID()] = "The presence shifts its attention."
 				}
 			}
 		}
 
-		// HIDE handling: server-authoritative enforcement and effects.
-		if action == agent.HIDE {
-			if d, ok := r.dungeonByAgent[a.ID()]; ok {
-				// cannot hide in CRITICAL band
-				if d.InstabilityBand() >= 3 {
-					action = agent.WAIT
-				} else {
-					// consume 1 energy and reduce aggro deterministically
-					switch at := a.(type) {
-					case *agent.RemoteHuman:
-						at.AdjustEnergy(-1)
-					case *agent.Human:
-						at.AdjustEnergy(-1)
-					case *agent.Scripted:
-						at.AdjustEnergy(-1)
-					}
-					for i := range d.Entities {
-						d.Entities[i].Aggro -= 1
-						if d.Entities[i].Aggro < 0 {
-							d.Entities[i].Aggro = 0
-						}
-					}
-				}
-			} else {
-				// HIDE outside dungeon is a no-op (treat as WAIT)
-				action = agent.WAIT
-			}
+		// v0.3.5: server-authoritative energy costs (adjust difference vs agent mirroring).
+		if inDungeon {
+			agentDelta := dungeonEnergyDelta(action, band)
+			authDelta := dungeonEnergyDelta(authoritative, band)
+			applyEnergyDelta(a, authDelta-agentDelta)
 		}
+
+		decisions[a.ID()] = authoritative
 
 		newPos := game.ResolveMovement(
 			pos,
-			action,
+			authoritative,
 			r.world.Width(),
 			r.world.Height(),
 		)
@@ -316,9 +437,9 @@ func (r *Runtime) TickOnce() Decisions {
 		// If agent is inside a dungeon and attempts to move onto the exit,
 		// treat that as an EXIT attempt (commitment). Enforce band/energy
 		// constraints server-side.
-				if d, ok := r.dungeonByAgent[a.ID()]; ok {
-					np := core.Position{X: newPos.X, Y: newPos.Y}
-					if np == d.Exit {
+		if d, ok := r.dungeonByAgent[a.ID()]; ok {
+			np := core.Position{X: newPos.X, Y: newPos.Y}
+			if np == d.Exit {
 				// check agent energy via concrete types
 				energy := agent.MaxEnergy
 				switch at := a.(type) {
@@ -436,9 +557,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		markerPos.Y,
 	)
 
-    // Deliver any pending one-shot event (e.g. forced-eject) to the next snapshot.
-    // Do this before mode branching so events set during TickOnce() are seen
-    // even if the agent's dungeon binding was removed earlier in the tick.
+	// Deliver any pending one-shot event (e.g. forced-eject) to the next snapshot.
+	// Do this before mode branching so events set during TickOnce() are seen
+	// even if the agent's dungeon binding was removed earlier in the tick.
 	if ev, ok := r.pendingEvents[a.ID()]; ok {
 		snap.Event = ev
 		delete(r.pendingEvents, a.ID())
@@ -522,8 +643,8 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			// Keep legacy fields populated for forward compatibility.
 			ExitStability: d.ExitStability,
 			AnchorType:    string(d.AnchorType),
-				AtAnchor:      snap.Position == d.Anchor,
-				AtExit:        snap.Position == d.Exit,
+			AtAnchor:      snap.Position == d.Anchor,
+			AtExit:        snap.Position == d.Exit,
 		}
 
 			// Populate decayed tiles slice for presentation and report distortion state.
@@ -538,84 +659,110 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				snap.Dungeon.InstabilityLabel = labels[band]
 			}
 
-			// Provide presentation-only action cost hints and blocked-action reasons
-			snap.Dungeon.ActionCosts = map[string]int{}
-			if band == 1 {
-				snap.Dungeon.ActionCosts["observe"] = 1
-			}
+		// Provide presentation-only action cost hints and blocked-action reasons
+		snap.Dungeon.ActionCosts = map[string]int{}
+		// MOVE costs more in UNSTABLE/DANGEROUS/CRITICAL.
+		if band >= 1 {
+			snap.Dungeon.ActionCosts["move"] = 1
+		}
+		// OBSERVE costs more in UNSTABLE/DANGEROUS; blocked in CRITICAL.
+		if band == 1 || band == 2 {
+			snap.Dungeon.ActionCosts["observe"] = 1
+		}
 
-			// Populate visible enemies and compute threat level.
-			visMap := map[core.Position]struct{}{}
-			for _, tv := range snap.Visible {
-				visMap[tv.Position] = struct{}{}
+		// Populate visible enemies and compute threat level.
+		visMap := map[core.Position]struct{}{}
+		for _, tv := range snap.Visible {
+			visMap[tv.Position] = struct{}{}
+		}
+		maxAgg := 0
+		nearest := 999
+		for _, e := range d.Entities {
+			if e.Aggro > maxAgg {
+				maxAgg = e.Aggro
 			}
-			maxAgg := 0
-			nearest := 999
-			for _, e := range d.Entities {
-				if e.Aggro > maxAgg {
-					maxAgg = e.Aggro
-				}
-				dist := util.IntAbs(e.Pos.X-snap.Position.X) + util.IntAbs(e.Pos.Y-snap.Position.Y)
-				if dist < nearest {
-					nearest = dist
-				}
-				// Only include enemy in view if visible to agent
-				if _, ok := visMap[e.Pos]; ok {
-					snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Pos: e.Pos, Threat: "", Glyph: 'w'})
-				}
+			dist := util.IntAbs(e.Pos.X-snap.Position.X) + util.IntAbs(e.Pos.Y-snap.Position.Y)
+			if dist < nearest {
+				nearest = dist
 			}
-			// threatScore: combine nearest distance (inverse), maxAggro, instability band
-			distScore := 0
-			if nearest < 999 {
-				if nearest <= 0 {
-					distScore = 3
+			// Determine the current target tag for presentation.
+			targetTag := "unknown"
+			if e.OverrideTicks > 0 && e.TargetOverride != "" {
+				switch e.TargetOverride {
+				case "anchor":
+					targetTag = "anchor"
+				case "exit":
+					targetTag = "exit"
+				case "unknown":
+					targetTag = "unknown"
+				}
+			} else {
+				// Default targeting priority: player (if visible), player last-known, anchor, exit.
+				if dist <= defaultVisibilityRadius {
+					targetTag = "player"
+				} else if e.HasLastKnown {
+					targetTag = "player"
 				} else {
-					distScore = 4 - nearest
+					targetTag = "anchor"
 				}
 			}
-			score := distScore
-			if maxAgg > score {
-				score = maxAgg
+			// Only include enemy in view if visible to agent
+			if _, ok := visMap[e.Pos]; ok {
+				snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Kind: string(e.Kind), X: e.Pos.X, Y: e.Pos.Y, Target: targetTag})
 			}
-			if band > score {
-				score = band
-			}
-			if score <= 1 {
-				snap.Dungeon.Threat = "LOW"
-			} else if score == 2 {
-				snap.Dungeon.Threat = "MEDIUM"
+		}
+		// threatScore: combine nearest distance (inverse), maxAggro, instability band
+		distScore := 0
+		if nearest < 999 {
+			if nearest <= 0 {
+				distScore = 3
 			} else {
-				snap.Dungeon.Threat = "HIGH"
+				distScore = 4 - nearest
 			}
-			if band == 3 {
-				snap.Dungeon.ActionCosts["move"] = 1
+		}
+		score := distScore
+		if maxAgg > score {
+			score = maxAgg
+		}
+		if band > score {
+			score = band
+		}
+		if score <= 1 {
+			snap.Dungeon.Threat = "LOW"
+		} else if score == 2 {
+			snap.Dungeon.Threat = "MEDIUM"
+		} else {
+			snap.Dungeon.Threat = "HIGH"
+		}
+		// Blocked actions by instability band (v0.3.5).
+		if band >= 2 {
+			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "wait:blocked")
+			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "distract:blocked")
+		}
+		if band >= 3 {
+			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "observe:blocked")
+			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "hide:blocked")
+		}
+		// EXIT: only permitted at exit tile; also in CRITICAL requires at least 1 energy
+		if !snap.Dungeon.AtExit {
+			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:not_at_exit")
+		} else {
+			// check agent energy
+			energy := agent.MaxEnergy
+			switch at := a.(type) {
+			case *agent.RemoteHuman:
+				energy = at.Energy()
+			case *agent.Human:
+				energy = at.Energy()
+			case *agent.Scripted:
+				energy = at.Energy()
 			}
-			// WAIT behavior in Dangerous band: no restore
-			if band == 2 {
-				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "wait:norest")
+			if band >= 3 && energy < 1 {
+				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:exhausted")
 			}
-			// EXIT: only permitted at exit tile; also in CRITICAL requires at least 1 energy
-			if !snap.Dungeon.AtExit {
-				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:not_at_exit")
-			} else {
-				// check agent energy
-				energy := agent.MaxEnergy
-				switch at := a.(type) {
-				case *agent.RemoteHuman:
-					energy = at.Energy()
-				case *agent.Human:
-					energy = at.Energy()
-				case *agent.Scripted:
-					energy = at.Energy()
-				}
-				if band >= 3 && energy < 1 {
-					snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:exhausted")
-				}
-			}
-			// HIDE is disabled in CRITICAL band
-			if band >= 3 {
-				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "hide:disabled")
-			}
+		}
+		// HIDE is disabled in CRITICAL band.
+		// (Preserved as blocked-action hint; enforcement is server-side.)
 		// One-shot narration events per band
 		if _, ok := r.dungeonNarration[a.ID()]; !ok {
 			r.dungeonNarration[a.ID()] = map[string]bool{}
@@ -692,4 +839,47 @@ func computeVisibleTiles(
 	}
 
 	return tiles
+}
+
+// dungeonEnergyDelta returns the energy delta (positive restores, negative costs)
+// for an action in dungeon mode for the given instability band.
+// This is used to keep the runtime authoritative while allowing agents to
+// mirror costs for UX.
+func dungeonEnergyDelta(action agent.Action, band int) int {
+	extraMove := 0
+	extraObserve := 0
+	waitRestore := agent.WaitEnergyRestore
+	if band >= 1 {
+		extraMove = 1
+	}
+	if band == 1 || band == 2 {
+		extraObserve = 1
+	}
+	if band >= 2 {
+		waitRestore = 0
+	}
+
+	switch action {
+	case agent.MOVE_N, agent.MOVE_S, agent.MOVE_E, agent.MOVE_W:
+		return -(agent.MoveEnergyCost + extraMove)
+	case agent.OBSERVE:
+		return -(agent.ObserveEnergyCost + extraObserve)
+	case agent.WAIT:
+		return waitRestore
+	case agent.HIDE:
+		return -2
+	case agent.DISTRACT:
+		return -3
+	default:
+		return 0
+	}
+}
+
+func applyEnergyDelta(a agent.Agent, delta int) {
+	if delta == 0 {
+		return
+	}
+	if adj, ok := a.(interface{ AdjustEnergy(int) }); ok {
+		adj.AdjustEnergy(delta)
+	}
 }
