@@ -85,13 +85,22 @@ func RenderGrid(obs agent.Observation) []string {
 		lines = append(lines, strings.Repeat("-", 7))
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
-            // build enemy lookup map for overlay
-            enemyMap := map[core.Position]agent.EnemyView{}
-            if obs.Dungeon != nil {
-                for _, ev := range obs.Dungeon.Enemies {
-                    enemyMap[ev.Pos] = ev
-                }
-            }
+			// build enemy lookup map for overlay
+			enemyMap := map[core.Position]agent.EnemyView{}
+			distractedAnchor := false
+			distractedExit := false
+			if obs.Dungeon != nil {
+				for _, ev := range obs.Dungeon.Enemies {
+					pos := core.Position{X: ev.X, Y: ev.Y}
+					enemyMap[pos] = ev
+					if ev.Target == "anchor" {
+						distractedAnchor = true
+					}
+					if ev.Target == "exit" {
+						distractedExit = true
+					}
+				}
+			}
 			for y, row := range obs.Dungeon.Grid {
 				var b strings.Builder
 				for x, ch := range row {
@@ -102,9 +111,18 @@ func RenderGrid(obs agent.Observation) []string {
 						b.WriteString(ANSIWhiteBright + "@" + ANSIReset)
 						continue
 					}
-					if ev, ok := enemyMap[pos]; ok {
-						// render dim/red 'w'
-						b.WriteString(ANSIRedBright + string(ev.Glyph) + ANSIReset)
+					if _, ok := enemyMap[pos]; ok {
+						// render dim/red 'w' (glyph fixed)
+						b.WriteString(ANSIRedBright + "w" + ANSIReset)
+						continue
+					}
+					// v0.3.5: subtle cue when an enemy is distracted toward anchor/exit.
+					if distractedAnchor && g == 'A' {
+						b.WriteString(ANSIMagentaDim + "A" + ANSIReset)
+						continue
+					}
+					if distractedExit && g == 'X' {
+						b.WriteString(ANSIMagentaDim + "X" + ANSIReset)
 						continue
 					}
 					b.WriteRune(g)
@@ -265,7 +283,7 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 				}
 			}
 			for _, b := range obs.Dungeon.BlockedActions {
-				if b == "wait:norest" {
+				if b == "wait:norest" || b == "wait:blocked" {
 					narration = append(narration, "No rest here.")
 				}
 				if b == "exit:exhausted" {
@@ -303,6 +321,16 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 			th = "LOW"
 		}
 		hud = append(hud, fmt.Sprintf("THREAT: %s", th))
+	}
+
+	// HUD cue: enemy locked onto you when any visible enemy targets player
+	if obs.Mode == "dungeon" && obs.Dungeon != nil {
+		for _, ev := range obs.Dungeon.Enemies {
+			if ev.Target == "player" {
+				hud = append(hud, "Enemy locked onto you")
+				break
+			}
+		}
 	}
 
 	statusLines := splitStatusLines(status)

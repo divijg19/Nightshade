@@ -52,6 +52,13 @@ type Entity struct {
 	Pos   core.Position
 	Kind  EntityKind
 	Aggro int
+	// TargetOverride is a temporary override: "anchor", "exit", "unknown"
+	TargetOverride string
+	// OverrideTicks remaining for the override
+	OverrideTicks int
+	// LastKnown player position (when player was last visible to this entity)
+	LastKnown    core.Position
+	HasLastKnown bool
 }
 
 func NewInstance(id string, anchor AnchorType) *Instance {

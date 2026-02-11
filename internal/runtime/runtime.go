@@ -24,6 +24,10 @@ type Runtime struct {
 	pendingEvents    map[string]string          // agentID -> event message shown once in next snapshot
 	pendingEjects    map[string]string          // agentID -> eject reason (delivered in next snapshot)
 	dungeonNarration map[string]map[string]bool // agentID -> map[eventName]seen
+
+	// v0.3.5: per-agent cooldowns for dungeon actions
+	hideCooldown     map[string]int
+	distractCooldown map[string]int
 }
 
 func New(agents []agent.Agent) *Runtime {
@@ -38,16 +42,18 @@ func New(agents []agent.Agent) *Runtime {
 		})
 	}
 	return &Runtime{
-		tick:           0,
-		agents:         agents,
-		world:          w,
-		board:          signal.NewBoard(5),
-		boardCursor:    map[string]int{},
-		dungeonByAgent: map[string]*dungeon.Instance{},
-		signalByAgent:  map[string]string{},
+		tick:             0,
+		agents:           agents,
+		world:            w,
+		board:            signal.NewBoard(5),
+		boardCursor:      map[string]int{},
+		dungeonByAgent:   map[string]*dungeon.Instance{},
+		signalByAgent:    map[string]string{},
 		pendingEvents:    map[string]string{},
 		pendingEjects:    map[string]string{},
 		dungeonNarration: map[string]map[string]bool{},
+		hideCooldown:     map[string]int{},
+		distractCooldown: map[string]int{},
 	}
 }
 

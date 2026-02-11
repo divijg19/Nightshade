@@ -22,7 +22,7 @@ type Observation struct {
 	// Position is the agent's current world position (for centering view)
 	Position core.Position
 	// One-shot event message attached by server (e.g., forced eject narration)
-	Event    string
+	Event string
 	// Presence contains ephemeral positional cues about nearby agents/NPCs.
 	// These are belief-derived impressions only and must not expose runtime truth.
 	Presence []PresenceCue
@@ -64,9 +64,9 @@ type DungeonView struct {
 	InstabilityBand int      `json:"instability_band"`
 
 	// InstabilityLabel is a human-friendly band label (STABLE/UNSTABLE/DANGEROUS/CRITICAL)
-	InstabilityLabel string            `json:"instability_label,omitempty"`
-	DecayedTiles     []core.Position   `json:"decayed_tiles,omitempty"`
-	DistortionActive bool              `json:"distortion_active,omitempty"`
+	InstabilityLabel string          `json:"instability_label,omitempty"`
+	DecayedTiles     []core.Position `json:"decayed_tiles,omitempty"`
+	DistortionActive bool            `json:"distortion_active,omitempty"`
 	// ActionCosts reports per-action extra costs (positive ints) imposed by
 	// environmental effects (e.g. UNSTABLE adds +1 to OBSERVE). Keys are
 	// simple labels: "observe", "move".
@@ -75,14 +75,14 @@ type DungeonView struct {
 	// currently possible (presentation hints only). Examples: "exit:exhausted".
 	BlockedActions []string `json:"blocked_actions,omitempty"`
 	// Enemies is a presentation-only list of visible enemies in the dungeon.
-	Enemies        []EnemyView `json:"enemies,omitempty"`
+	Enemies []EnemyView `json:"enemies,omitempty"`
 	// Threat is a short label: LOW / MEDIUM / HIGH
-	Threat         string      `json:"threat,omitempty"`
+	Threat string `json:"threat,omitempty"`
 
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
-	ExitState    string `json:"exit_state,omitempty"`
+	ExitState string `json:"exit_state,omitempty"`
 	// Event is a one-shot narration string (populated by server)
-	Event        string `json:"event,omitempty"`
+	Event string `json:"event,omitempty"`
 
 	// Legacy/forward-compat fields (unused in pressure-only step).
 	ExitStability int    `json:"exit_stability,omitempty"`
@@ -109,7 +109,8 @@ type PresenceCue struct {
 
 // EnemyView is a minimal presentation view of a hostile entity.
 type EnemyView struct {
-	Pos    core.Position `json:"pos,omitempty"`
-	Threat string        `json:"threat,omitempty"`
-	Glyph  rune          `json:"glyph,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	X      int    `json:"x,omitempty"`
+	Y      int    `json:"y,omitempty"`
+	Target string `json:"target,omitempty"` // "player" | "anchor" | "exit" | "unknown"
 }

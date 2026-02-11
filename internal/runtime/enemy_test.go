@@ -93,14 +93,15 @@ func TestThreatLevelEscalation(t *testing.T) {
 func TestEnemyHaltsAfterEject(t *testing.T) {
 	rt, a := setupRuntimeWithAgent(t)
 	d := rt.dungeonByAgent[a.ID()]
-	e := d.Entities[0]
+	_ = d.Entities[0]
 	// cause collapse eject
-	rt.world.SetPosition(a.ID(), world.Position{X: e.Pos.X, Y: e.Pos.Y + 1})
+	epos0 := d.Entities[0].Pos
+	rt.world.SetPosition(a.ID(), world.Position{X: epos0.X, Y: epos0.Y + 1})
 	a.AdjustEnergy(-(agent.MaxEnergy - 1))
 	a.RecvInput <- "."
 	rt.TickOnce()
-	// capture entity pos
-	posAfter := e.Pos
+	// capture entity pos after the eject tick
+	posAfter := d.Entities[0].Pos
 	// next tick with no agents bound (entity should not act)
 	a.RecvInput <- "."
 	rt.TickOnce()

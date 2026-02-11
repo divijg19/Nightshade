@@ -50,7 +50,7 @@ func (h *Human) AdjustEnergy(delta int) {
 // avoid touching runtime package). This mirrors runtime.defaultVisibilityRadius.
 const humanVisibilityRadius = 2
 
-func keyToAction(key string) Action {
+func keyToActionContext(key string, inDungeon bool) Action {
 	if key == "" {
 		return WAIT
 	}
@@ -63,7 +63,15 @@ func keyToAction(key string) Action {
 	case 'a':
 		return MOVE_W
 	case 'd':
+		if inDungeon {
+			return DISTRACT
+		}
 		return MOVE_E
+	case 'h':
+		if inDungeon {
+			return HIDE
+		}
+		return WAIT
 	case 'e':
 		return OBSERVE
 	case '.':
@@ -253,7 +261,12 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	}
 
 	// 9. Translate to intended Action
-	intended := keyToAction(input)
+	// Dungeon-only keys must be gated by the authoritative snapshot mode.
+	inDungeon := false
+	if vm, ok := snapshot.(interface{ ViewMode() string }); ok {
+		inDungeon = vm.ViewMode() == "dungeon"
+	}
+	intended := keyToActionContext(input, inDungeon)
 
 	// 10. Apply caution override
 	if intended == MOVE_N || intended == MOVE_S || intended == MOVE_E || intended == MOVE_W {
@@ -284,14 +297,14 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 	waitRestore := WaitEnergyRestore
 	if dv, ok := snapshot.(interface{ DungeonValue() DungeonView }); ok {
 		d := dv.DungeonValue()
-		if d.InstabilityBand == 1 {
+		if d.InstabilityBand >= 1 {
+			extraMove = 1
+		}
+		if d.InstabilityBand == 1 || d.InstabilityBand == 2 {
 			extraObserve = 1
 		}
-		if d.InstabilityBand == 2 {
+		if d.InstabilityBand >= 2 {
 			waitRestore = 0
-		}
-		if d.InstabilityBand >= 3 {
-			extraMove = 1
 		}
 	}
 	switch final {
@@ -299,6 +312,10 @@ func (h *Human) Decide(snapshot Snapshot) Action {
 		h.energy -= (MoveEnergyCost + extraMove)
 	case OBSERVE:
 		h.energy -= (ObserveEnergyCost + extraObserve)
+	case HIDE:
+		h.energy -= 2
+	case DISTRACT:
+		h.energy -= 3
 	case WAIT:
 		h.energy += waitRestore
 	}
