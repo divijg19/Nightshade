@@ -13,9 +13,10 @@ import (
 // for sending observations to a client and receiving a single-key input
 // per tick. It does not perform any terminal I/O.
 type RemoteHuman struct {
-	id     string
-	memory *Memory
-	energy int
+	id             string
+	memory         *Memory
+	energy         int
+	maxEnergyBonus int
 
 	// Channels populated by server connection goroutines.
 	SendObservation chan Observation // server -> client
@@ -52,13 +53,16 @@ func (r *RemoteHuman) Energy() int     { return r.energy }
 // AdjustEnergy adjusts the agent's energy by delta and clamps to allowed range.
 func (r *RemoteHuman) AdjustEnergy(delta int) {
 	r.energy += delta
-	if r.energy > MaxEnergy {
-		r.energy = MaxEnergy
+	cap := MaxEnergy + r.maxEnergyBonus
+	if r.energy > cap {
+		r.energy = cap
 	}
 	if r.energy < MinEnergy {
 		r.energy = MinEnergy
 	}
 }
+
+func (r *RemoteHuman) SetMaxEnergyBonus(b int) { r.maxEnergyBonus = b }
 
 // SetConnected marks whether a client is currently attached to this RemoteHuman.
 // This is used by the server to indicate that TickOnce should block waiting
@@ -253,6 +257,19 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
 		if e := ev.EventValue(); e != "" {
 			obs.Event = e
 		}
+	}
+	// Copy progression/presentation-only fields if present on the snapshot
+	if fv, ok := snapshot.(interface{ FragmentsValue() int }); ok {
+		obs.Fragments = fv.FragmentsValue()
+	}
+	if sv, ok := snapshot.(interface{ SkillPointsValue() int }); ok {
+		obs.SkillPoints = sv.SkillPointsValue()
+	}
+	if uv, ok := snapshot.(interface{ UnlockedSkillsValue() []string }); ok {
+		obs.UnlockedSkills = uv.UnlockedSkillsValue()
+	}
+	if av, ok := snapshot.(interface{ AvailableSkillsValue() []Skill }); ok {
+		obs.AvailableSkills = av.AvailableSkillsValue()
 	}
 	// Compute positional presence cues from belief signals (best-effort, non-leaky):
 	// if other agents have emitted belief signals within BeliefRadius, add an

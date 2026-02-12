@@ -34,6 +34,12 @@ type Observation struct {
 	Board *BoardView `json:"board,omitempty"`
 	// Dungeon is populated when Mode == "dungeon".
 	Dungeon *DungeonView `json:"dungeon,omitempty"`
+	// Progression hints populated from board-mode snapshots
+	Fragments      int      `json:"fragments,omitempty"`
+	SkillPoints    int      `json:"skill_points,omitempty"`
+	UnlockedSkills []string `json:"unlocked_skills,omitempty"`
+	// AvailableSkills is populated when server includes the upgrade UI listing
+	AvailableSkills []Skill `json:"available_skills,omitempty"`
 }
 
 // BoardView is a compact, client-facing representation of the server-owned Signal Board.
@@ -89,6 +95,14 @@ type DungeonView struct {
 	AnchorType    string `json:"anchor_type,omitempty"`
 	AtAnchor      bool   `json:"at_anchor,omitempty"`
 	AtExit        bool   `json:"at_exit,omitempty"`
+	// FragmentsEarnedThisRun is informational: fragments gained this run
+	FragmentsEarnedThisRun int `json:"fragments_earned_this_run,omitempty"`
+	// HighestPressureThisRun is informational: highest pressure reached this run
+	HighestPressureThisRun int `json:"highest_pressure_this_run,omitempty"`
+	// ActiveSkillShortNames lists unlocked skill short IDs
+	ActiveSkillShortNames []string `json:"active_skills,omitempty"`
+	// NextBandThreshold (if pressure_sense unlocked) shows remaining pressure to next band
+	NextBandThreshold int `json:"next_band_threshold,omitempty"`
 }
 
 // PresenceType enumerates the kinds of perceived presences.

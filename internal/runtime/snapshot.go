@@ -15,9 +15,15 @@ type Snapshot struct {
 	Known    []core.TileView
 
 	// Presentation-only metadata for v0.3.0 UI.
-	Mode    string
-	Board   agent.BoardView
-	Dungeon agent.DungeonView
+	Mode  string
+	Board agent.BoardView
+	// Board-mode progression hints
+	Fragments      int
+	SkillPoints    int
+	UnlockedSkills []string
+	// AvailableSkills is populated when the client requests upgrade UI
+	AvailableSkills []agent.Skill
+	Dungeon         agent.DungeonView
 	// One-shot event message propagated to the agent (e.g., forced eject)
 	Event string
 	// Ejected indicates the agent was forcibly removed from a dungeon
@@ -58,3 +64,9 @@ func (s Snapshot) DungeonValue() agent.DungeonView { return s.Dungeon }
 
 // EventValue exposes a one-shot event message attached to this snapshot.
 func (s Snapshot) EventValue() string { return s.Event }
+
+// Progression accessors
+func (s Snapshot) FragmentsValue() int                 { return s.Fragments }
+func (s Snapshot) SkillPointsValue() int               { return s.SkillPoints }
+func (s Snapshot) UnlockedSkillsValue() []string       { return s.UnlockedSkills }
+func (s Snapshot) AvailableSkillsValue() []agent.Skill { return s.AvailableSkills }

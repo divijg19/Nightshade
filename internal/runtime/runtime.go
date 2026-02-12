@@ -4,6 +4,7 @@ import (
 	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/dungeon"
+	"github.com/divijg19/Nightshade/internal/persist"
 	"github.com/divijg19/Nightshade/internal/signal"
 	"github.com/divijg19/Nightshade/internal/world"
 )
@@ -28,6 +29,13 @@ type Runtime struct {
 	// v0.3.5: per-agent cooldowns for dungeon actions
 	hideCooldown     map[string]int
 	distractCooldown map[string]int
+	// progression store loaded per-agent
+	progressByAgent map[string]*persist.Progress
+	// per-run stats for currently-bound dungeons
+	runStats map[string]struct {
+		FragmentsEarnedThisRun int
+		HighestPressureThisRun int
+	}
 }
 
 func New(agents []agent.Agent) *Runtime {
@@ -41,7 +49,7 @@ func New(agents []agent.Agent) *Runtime {
 			Y: 0,
 		})
 	}
-	return &Runtime{
+	rt := &Runtime{
 		tick:             0,
 		agents:           agents,
 		world:            w,
@@ -54,7 +62,35 @@ func New(agents []agent.Agent) *Runtime {
 		dungeonNarration: map[string]map[string]bool{},
 		hideCooldown:     map[string]int{},
 		distractCooldown: map[string]int{},
+		progressByAgent:  map[string]*persist.Progress{},
+		runStats: map[string]struct {
+			FragmentsEarnedThisRun int
+			HighestPressureThisRun int
+		}{},
 	}
+	// Preload progress for all agents (backward-compatible: missing files yield defaults)
+	for _, a := range agents {
+		if p, err := persist.LoadProgress(a.ID()); err == nil {
+			rt.progressByAgent[a.ID()] = p
+		} else {
+			rt.progressByAgent[a.ID()] = persist.DefaultProgress()
+		}
+	}
+	// Apply per-agent endurance bonuses to agent instances
+	for _, a := range agents {
+		if p, ok := rt.progressByAgent[a.ID()]; ok && p != nil {
+			bonus := 0
+			if p.UnlockedSkills["endurance_2"] {
+				bonus = 10
+			} else if p.UnlockedSkills["endurance_1"] {
+				bonus = 5
+			}
+			if setter, ok := a.(interface{ SetMaxEnergyBonus(int) }); ok {
+				setter.SetMaxEnergyBonus(bonus)
+			}
+		}
+	}
+	return rt
 }
 
 func (r *Runtime) Tick() int {

@@ -18,9 +18,10 @@ var HumanInput func() (string, error) = func() (string, error) {
 }
 
 type Human struct {
-	id     string
-	memory *Memory
-	energy int
+	id             string
+	memory         *Memory
+	energy         int
+	maxEnergyBonus int
 	// replay buffer and state (human-only introspection replay)
 	snaps        snapshotRing
 	inReplay     bool
@@ -38,13 +39,16 @@ func (h *Human) Energy() int     { return h.energy }
 // AdjustEnergy adjusts the human's energy by delta and clamps to allowed range.
 func (h *Human) AdjustEnergy(delta int) {
 	h.energy += delta
-	if h.energy > MaxEnergy {
-		h.energy = MaxEnergy
+	cap := MaxEnergy + h.maxEnergyBonus
+	if h.energy > cap {
+		h.energy = cap
 	}
 	if h.energy < MinEnergy {
 		h.energy = MinEnergy
 	}
 }
+
+func (h *Human) SetMaxEnergyBonus(b int) { h.maxEnergyBonus = b }
 
 // visibility radius must match the runtime default (kept as literal to
 // avoid touching runtime package). This mirrors runtime.defaultVisibilityRadius.
