@@ -225,9 +225,10 @@ func buildObservation(mem *Memory, snapshot interface{}, prevLastSeen map[core.P
 }
 
 type Scripted struct {
-	id     string
-	memory *Memory
-	energy int
+	id             string
+	memory         *Memory
+	energy         int
+	maxEnergyBonus int
 }
 
 func NewScripted(id string) *Scripted {
@@ -401,13 +402,16 @@ func (s *Scripted) Energy() int { return s.energy }
 // AdjustEnergy adjusts scripted agent's energy by delta and clamps.
 func (s *Scripted) AdjustEnergy(delta int) {
 	s.energy += delta
-	if s.energy > MaxEnergy {
-		s.energy = MaxEnergy
+	cap := MaxEnergy + s.maxEnergyBonus
+	if s.energy > cap {
+		s.energy = cap
 	}
 	if s.energy < MinEnergy {
 		s.energy = MinEnergy
 	}
 }
+
+func (s *Scripted) SetMaxEnergyBonus(b int) { s.maxEnergyBonus = b }
 
 // Oscillating moves north on even ticks and south on odd ticks.
 type Oscillating struct {

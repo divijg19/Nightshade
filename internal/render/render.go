@@ -59,6 +59,10 @@ func RenderGrid(obs agent.Observation) []string {
 	if obs.Mode == "board" && obs.Board != nil {
 		lines := make([]string, 0, 9)
 		lines = append(lines, "== SIGNAL BOARD ==")
+		// show progression summary
+		lines = append(lines, fmt.Sprintf("Fragments: %d", obs.Fragments))
+		lines = append(lines, fmt.Sprintf("SkillPoints: %d", obs.SkillPoints))
+		lines = append(lines, "Press U to upgrade.")
 		lines = append(lines, "")
 		for i, s := range obs.Board.Signals {
 			cursor := " "
@@ -80,6 +84,22 @@ func RenderGrid(obs agent.Observation) []string {
 		lines := make([]string, 0, 16)
 		if obs.Dungeon == nil {
 			return []string{"(dungeon)"}
+		}
+		// render active build line when present
+		if len(obs.Dungeon.ActiveSkillShortNames) > 0 {
+			skills := agent.AllSkills()
+			names := make([]string, 0, len(obs.Dungeon.ActiveSkillShortNames))
+			for _, id := range obs.Dungeon.ActiveSkillShortNames {
+				if s, ok := skills[id]; ok {
+					names = append(names, s.Name)
+				} else {
+					names = append(names, id)
+				}
+			}
+			lines = append(lines, "Build: "+strings.Join(names, ", "))
+		}
+		if obs.Dungeon.NextBandThreshold > 0 {
+			lines = append(lines, fmt.Sprintf("Next band in %d", obs.Dungeon.NextBandThreshold))
 		}
 		lines = append(lines, fmt.Sprintf("PRESSURE %d / %d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure))
 		lines = append(lines, strings.Repeat("-", 7))

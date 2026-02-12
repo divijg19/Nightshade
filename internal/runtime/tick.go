@@ -7,6 +7,7 @@ import (
 	"github.com/divijg19/Nightshade/internal/core"
 	"github.com/divijg19/Nightshade/internal/dungeon"
 	"github.com/divijg19/Nightshade/internal/game"
+	"github.com/divijg19/Nightshade/internal/persist"
 	"github.com/divijg19/Nightshade/internal/util"
 )
 
@@ -54,7 +55,24 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 			}
 		}
-		inst.TickWithAnchor(atAnchor, r.tick)
+		// determine anchor cadence (default 2); if the occupying agent at the anchor
+		// has anchor_mastery, slow to every 3 ticks.
+		cadence := 2
+		if atAnchor {
+			for _, aid := range agentIDs {
+				if p, ok := instAgentPositions[inst][aid]; ok {
+					if p == inst.Anchor {
+						if pr, ok2 := r.progressByAgent[aid]; ok2 && pr != nil {
+							if pr.UnlockedSkills["anchor_mastery"] {
+								cadence = 3
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+		inst.TickWithAnchor(atAnchor, r.tick, cadence)
 
 		// Entity pipeline: perception -> movement -> effects (one action per tick)
 		// Only run entities if instance still has agents bound.
@@ -111,7 +129,7 @@ func (r *Runtime) TickOnce() Decisions {
 			if nearestAny <= 3 {
 				e.Aggro += 1
 			}
-            // Update last-known when a player is visible.
+			// Update last-known when a player is visible.
 			if nearestVisible != 999 {
 				e.LastKnown = nearestVisiblePos
 				e.HasLastKnown = true
@@ -156,13 +174,13 @@ func (r *Runtime) TickOnce() Decisions {
 						target = inst.Anchor
 					}
 				} else {
-				if nearestVisible != 999 {
-					target = nearestVisiblePos
-				} else if e.HasLastKnown {
-					target = e.LastKnown
-				} else {
-					target = inst.Anchor
-				}
+					if nearestVisible != 999 {
+						target = nearestVisiblePos
+					} else if e.HasLastKnown {
+						target = e.LastKnown
+					} else {
+						target = inst.Anchor
+					}
 				}
 			}
 
@@ -223,7 +241,7 @@ func (r *Runtime) TickOnce() Decisions {
 			for _, aid := range agentIDs {
 				if pos, ok := instAgentPositions[inst][aid]; ok {
 					dist := util.IntAbs(e.Pos.X-pos.X) + util.IntAbs(e.Pos.Y-pos.Y)
-						if dist == 1 {
+					if dist == 1 {
 						// apply energy penalty to agent
 						for _, a := range r.agents {
 							if a.ID() != aid {
@@ -252,6 +270,10 @@ func (r *Runtime) TickOnce() Decisions {
 								if r.board != nil {
 									// remove bindings
 									delete(r.signalByAgent, aid)
+								}
+								// apply deterministic rewards for forced-eject
+								if inst, ok := r.dungeonByAgent[aid]; ok {
+									r.applyDungeonRewards(aid, inst, false)
 								}
 								delete(r.dungeonByAgent, aid)
 								r.pendingEvents[aid] = "You collapse and are expelled."
@@ -287,6 +309,10 @@ func (r *Runtime) TickOnce() Decisions {
 						tv := core.TileView{Position: pos, Glyph: 'X', Visible: true}
 						mem.SetMemoryTile(pos, agent.MemoryTile{Tile: tv, LastSeen: r.tick, ScarLevel: 1})
 					}
+				}
+				// apply deterministic rewards for collapse
+				if inst, ok := r.dungeonByAgent[aid]; ok {
+					r.applyDungeonRewards(aid, inst, false)
 				}
 				// remove bindings
 				delete(r.dungeonByAgent, aid)
@@ -325,6 +351,40 @@ func (r *Runtime) TickOnce() Decisions {
 			if signalID, ok2 := parseEnterSignal(in); ok2 {
 				_ = r.tryEnterSignal(a.ID(), signalID)
 				// Do not feed this special command into the cognition key parser.
+				inputs[a.ID()] = ""
+			} else if strings.TrimSpace(in) == "UPGRADE" {
+				// send a fresh snapshot containing AvailableSkills/unlocked info
+				rsh := r.snapshotFor(a, agent.Action(-1))
+				rh.Observe(rsh)
+				inputs[a.ID()] = ""
+			} else if strings.HasPrefix(strings.TrimSpace(in), "UNLOCK ") {
+				skillID := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(in), "UNLOCK "))
+				p, ok := r.progressByAgent[a.ID()]
+				if !ok || p == nil {
+					p = persist.DefaultProgress()
+					r.progressByAgent[a.ID()] = p
+				}
+				if err := agent.UnlockSkill(p, skillID); err != nil {
+					r.pendingEvents[a.ID()] = "Unlock failed: " + err.Error()
+				} else {
+					_ = persist.SaveProgress(a.ID(), p)
+					r.pendingEvents[a.ID()] = "Skill unlocked."
+					// If endurance unlocked, update agent instance cap immediately
+					bonus := 0
+					if p.UnlockedSkills["endurance_2"] {
+						bonus = 10
+					} else if p.UnlockedSkills["endurance_1"] {
+						bonus = 5
+					}
+					for _, ag := range r.agents {
+						if ag.ID() == a.ID() {
+							if setter, ok := ag.(interface{ SetMaxEnergyBonus(int) }); ok {
+								setter.SetMaxEnergyBonus(bonus)
+							}
+							break
+						}
+					}
+				}
 				inputs[a.ID()] = ""
 			} else {
 				inputs[a.ID()] = in
@@ -422,8 +482,13 @@ func (r *Runtime) TickOnce() Decisions {
 				} else if r.hideCooldown[a.ID()] > 0 {
 					authoritative = agent.WAIT
 				} else {
-					// set to 2 because cooldowns decrement at tick start
-					r.hideCooldown[a.ID()] = 2
+					// determine hide duration (1 by default; deep_concealment -> 2)
+					hideDur := 1
+					if p, ok := r.progressByAgent[a.ID()]; ok && p.UnlockedSkills["deep_concealment"] {
+						hideDur = 2
+					}
+					// set cooldown (ticks) and apply overrides (+1 because decremented at tick start)
+					r.hideCooldown[a.ID()] = hideDur + 1
 					for i := range inst.Entities {
 						e := &inst.Entities[i]
 						// Sentinels are immune to hide/distract.
@@ -436,8 +501,8 @@ func (r *Runtime) TickOnce() Decisions {
 							e.LockTicks = 0
 						}
 						e.TargetOverride = "unknown"
-						// overrides set for 2 ticks
-						e.OverrideTicks = 2
+						// set override to desired duration +1
+						e.OverrideTicks = hideDur + 1
 					}
 					r.pendingEvents[a.ID()] = "You fade from immediate pursuit."
 				}
@@ -480,8 +545,13 @@ func (r *Runtime) TickOnce() Decisions {
 						} else {
 							e.TargetOverride = "exit"
 						}
-						// overrides set for 3 ticks
-						e.OverrideTicks = 3
+						// determine distract duration (default 2; extended_distract -> 3)
+						distDur := 2
+						if p, ok := r.progressByAgent[a.ID()]; ok && p.UnlockedSkills["extended_distract"] {
+							distDur = 3
+						}
+						// overrides set to duration+1 because they decrement at tick start
+						e.OverrideTicks = distDur + 1
 						r.pendingEvents[a.ID()] = "The presence shifts its attention."
 					}
 				}
@@ -492,6 +562,24 @@ func (r *Runtime) TickOnce() Decisions {
 		if inDungeon {
 			agentDelta := dungeonEnergyDelta(action, band)
 			authDelta := dungeonEnergyDelta(authoritative, band)
+			// Skill: Stability Training reduces CRITICAL move penalty by 1
+			if band >= 3 {
+				if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+					if p.UnlockedSkills["stability_training"] {
+						// if authoritative action is a move, reduce cost by 1
+						switch authoritative {
+						case agent.MOVE_N, agent.MOVE_S, agent.MOVE_E, agent.MOVE_W:
+							authDelta += 1
+						}
+					}
+					// Efficient Observe reduces OBSERVE cost by 1 (if positive)
+					if p.UnlockedSkills["efficient_observe"] {
+						if authoritative == agent.OBSERVE {
+							authDelta += 1
+						}
+					}
+				}
+			}
 			applyEnergyDelta(a, authDelta-agentDelta)
 		}
 
@@ -521,11 +609,35 @@ func (r *Runtime) TickOnce() Decisions {
 					energy = at.Energy()
 				}
 				band := d.InstabilityBand()
-				// If in CRITICAL band and exhausted (energy < 1) then exit fails.
+				// If in CRITICAL band and exhausted (energy < 1) then exit fails
+				// unless the agent has unlocked `exit_instinct`.
 				if band >= 3 && energy < 1 {
-					// silent failure; renderer will be hinted via snapshot.BlockedActions
+					allow := false
+					if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+						if p.UnlockedSkills["exit_instinct"] {
+							allow = true
+						}
+					}
+					if !allow {
+						// silent failure; renderer will be hinted via snapshot.BlockedActions
+					} else {
+						// allow exit: compute rewards first
+						if r != nil {
+							r.applyDungeonRewards(a.ID(), d, true)
+						}
+						d.Pressure = 0
+						d.Done = true
+						delete(r.dungeonByAgent, a.ID())
+						delete(r.signalByAgent, a.ID())
+						// deliver a short confirmation next snapshot (presentation-only)
+						r.pendingEvents[a.ID()] = "You exit the dungeon."
+					}
 				} else {
 					// Successful exit: reset pressure, mark instance done, remove bindings.
+					// compute rewards first using current pressure/state
+					if r != nil {
+						r.applyDungeonRewards(a.ID(), d, true)
+					}
 					d.Pressure = 0
 					d.Done = true
 					d.DoneReason = "exit"
@@ -587,10 +699,23 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	}
 
 	inst := dungeon.NewInstance("D-"+signalID, dungeon.AnchorType(string(s.Anchor)))
-	// seed deterministic default entities
-	inst.AddDefaultEntities()
+	// seed deterministic entities based on signal type and current tick
+	inst.SeedEntitiesForSignal(string(s.Type), r.tick)
 	r.dungeonByAgent[agentID] = inst
 	r.signalByAgent[agentID] = signalID
+	// ensure progress record exists
+	if _, ok := r.progressByAgent[agentID]; !ok {
+		if p, err := persist.LoadProgress(agentID); err == nil {
+			r.progressByAgent[agentID] = p
+		} else {
+			r.progressByAgent[agentID] = persist.DefaultProgress()
+		}
+	}
+	// initialize run stats
+	r.runStats[agentID] = struct {
+		FragmentsEarnedThisRun int
+		HighestPressureThisRun int
+	}{FragmentsEarnedThisRun: 0, HighestPressureThisRun: inst.Pressure}
 	return true
 }
 
@@ -777,9 +902,19 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				}
 			}
 			// Only include enemy in view if visible to agent
-				if _, ok := visMap[e.Pos]; ok {
-					snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Kind: string(e.Kind), X: e.Pos.X, Y: e.Pos.Y, Target: targetTag, TargetLocked: e.TargetLocked})
+			if _, ok := visMap[e.Pos]; ok {
+				// snapshot-level telegraphing for Threat Awareness
+				displayLocked := e.TargetLocked
+				if p, ok := r.progressByAgent[a.ID()]; ok {
+					if p.UnlockedSkills["threat_awareness"] {
+						// telegraph one tick earlier: if LockTicks == 1, show as locked
+						if e.LockTicks == 1 {
+							displayLocked = true
+						}
+					}
 				}
+				snap.Dungeon.Enemies = append(snap.Dungeon.Enemies, agent.EnemyView{Kind: string(e.Kind), X: e.Pos.X, Y: e.Pos.Y, Target: targetTag, TargetLocked: displayLocked})
+			}
 		}
 		// threatScore: combine nearest distance (inverse), maxAggro, instability band
 		distScore := 0
@@ -850,6 +985,45 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			snap.Dungeon.Event = "The exit shows signs of collapse."
 		}
 
+		// Attach progression/run stats for presentation
+		if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+			snap.Fragments = p.Fragments
+			snap.SkillPoints = p.SkillPoints
+			// list unlocked skills
+			ul := make([]string, 0, len(p.UnlockedSkills))
+			for k := range p.UnlockedSkills {
+				ul = append(ul, k)
+			}
+			snap.UnlockedSkills = ul
+			// populate active skills in dungeon view
+			active := make([]string, 0, len(p.UnlockedSkills))
+			for k := range p.UnlockedSkills {
+				active = append(active, k)
+			}
+			snap.Dungeon.ActiveSkillShortNames = active
+			// NextBandThreshold when pressure_sense unlocked
+			if p.UnlockedSkills["pressure_sense"] {
+				// compute next threshold
+				cur := d.Pressure
+				next := 6
+				switch {
+				case cur >= 16:
+					next = 0
+				case cur >= 11:
+					next = 16
+				case cur >= 6:
+					next = 11
+				default:
+					next = 6
+				}
+				snap.Dungeon.NextBandThreshold = next - cur
+			}
+		}
+		// run stats
+		rs := r.runStats[a.ID()]
+		snap.Dungeon.FragmentsEarnedThisRun = rs.FragmentsEarnedThisRun
+		snap.Dungeon.HighestPressureThisRun = rs.HighestPressureThisRun
+
 		return snap
 	}
 
@@ -870,6 +1044,23 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				Locked:   s.LockedBy != "" && s.LockedBy != a.ID(),
 				Burned:   s.Burned,
 			})
+		}
+		// attach progression info for board mode
+		if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+			snap.Fragments = p.Fragments
+			snap.SkillPoints = p.SkillPoints
+			ul := make([]string, 0, len(p.UnlockedSkills))
+			for k := range p.UnlockedSkills {
+				ul = append(ul, k)
+			}
+			snap.UnlockedSkills = ul
+			// populate available skills listing (always present)
+			skills := agent.AllSkills()
+			avail := make([]agent.Skill, 0, len(skills))
+			for _, v := range skills {
+				avail = append(avail, v)
+			}
+			snap.AvailableSkills = avail
 		}
 		snap.Board = agent.BoardView{Cursor: cursor, Signals: views}
 	}
@@ -952,4 +1143,51 @@ func applyEnergyDelta(a agent.Agent, delta int) {
 	if adj, ok := a.(interface{ AdjustEnergy(int) }); ok {
 		adj.AdjustEnergy(delta)
 	}
+}
+
+// CalculateFragments deterministically computes fragment rewards for a dungeon run.
+func CalculateFragments(maxPressure int, instabilityBand int, exited bool) int {
+	base := 2
+	pressureBonus := maxPressure / 3
+	bandBonus := instabilityBand
+	survivalBonus := 0
+	if exited {
+		survivalBonus = 2
+	}
+	return base + pressureBonus + bandBonus + survivalBonus
+}
+
+// applyDungeonRewards updates progress for the agent and persists it.
+func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, exited bool) {
+	if inst == nil {
+		return
+	}
+	maxPressure := inst.Pressure
+	band := inst.InstabilityBand()
+	fragments := CalculateFragments(maxPressure, band, exited)
+	// ensure progress entry exists
+	p, ok := r.progressByAgent[agentID]
+	if !ok || p == nil {
+		if np, err := persist.LoadProgress(agentID); err == nil {
+			p = np
+		} else {
+			p = persist.DefaultProgress()
+		}
+		r.progressByAgent[agentID] = p
+	}
+	p.Fragments += fragments
+	p.TotalDungeons += 1
+	if maxPressure > p.HighestPressureReached {
+		p.HighestPressureReached = maxPressure
+	}
+	p.SkillPoints = p.Fragments / 10
+	// persist immediately
+	_ = persist.SaveProgress(agentID, p)
+	// update run stats for snapshot presentation
+	rs := r.runStats[agentID]
+	rs.FragmentsEarnedThisRun = fragments
+	if maxPressure > rs.HighestPressureThisRun {
+		rs.HighestPressureThisRun = maxPressure
+	}
+	r.runStats[agentID] = rs
 }
