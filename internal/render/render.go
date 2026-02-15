@@ -102,6 +102,12 @@ func RenderGrid(obs agent.Observation) []string {
 			lines = append(lines, fmt.Sprintf("Next band in %d", obs.Dungeon.NextBandThreshold))
 		}
 		lines = append(lines, fmt.Sprintf("PRESSURE %d / %d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure))
+		if obs.Dungeon.ObjectiveType != "" {
+			lines = append(lines, fmt.Sprintf("OBJECTIVE %s %d/%d", obs.Dungeon.ObjectiveType, obs.Dungeon.ObjectiveProgress, obs.Dungeon.ObjectiveTarget))
+		}
+		if obs.Dungeon.Phase != "" {
+			lines = append(lines, fmt.Sprintf("INTEGRITY %d%%  PHASE %s", obs.Dungeon.CoreIntegrity, obs.Dungeon.Phase))
+		}
 		lines = append(lines, strings.Repeat("-", 7))
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
@@ -324,6 +330,9 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 				if b == "exit:not_at_exit" {
 					// subtle hint only
 					narration = append(narration, "You must reach the exit to leave.")
+				}
+				if b == "exit:objective_incomplete" {
+					narration = append(narration, "Objective incomplete.")
 				}
 			}
 			// One-shot server events (e.g., eject) will be appended globally below.
