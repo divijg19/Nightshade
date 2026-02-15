@@ -68,6 +68,12 @@ type DungeonView struct {
 	MaxPressure     int      `json:"max_pressure"`
 	Tick            int      `json:"tick"`
 	InstabilityBand int      `json:"instability_band"`
+	ObjectiveType   string   `json:"objective_type,omitempty"`
+	ObjectiveProgress int    `json:"objective_progress,omitempty"`
+	ObjectiveTarget int      `json:"objective_target,omitempty"`
+	ObjectiveCompleted bool  `json:"objective_completed,omitempty"`
+	CoreIntegrity int        `json:"core_integrity,omitempty"`
+	Phase string             `json:"phase,omitempty"`
 
 	// InstabilityLabel is a human-friendly band label (STABLE/UNSTABLE/DANGEROUS/CRITICAL)
 	InstabilityLabel string          `json:"instability_label,omitempty"`

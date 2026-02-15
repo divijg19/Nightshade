@@ -28,14 +28,14 @@ func TestSurvivalBonusOnlyOnExit(t *testing.T) {
 	rt.applyDungeonRewards(a.ID(), inst, false)
 	p2 := rt.progressByAgent[a.ID()]
 	// compute fragments awarded this run directly
-	fragForced := CalculateFragments(inst.Pressure, inst.InstabilityBand(), false)
+	fragForced := CalculateFragments(inst.Pressure, inst.InstabilityBand(), false, inst.ObjectiveCompleted, inst.CoreIntegrity)
 	if p2.Fragments != start+fragForced {
 		t.Fatalf("expected fragments %d got %d", start+fragForced, p2.Fragments)
 	}
 	// now test exit path: award additional fragments via exited=true
 	inst2 := dungeon.NewInstance("D-r2", dungeon.AnchorMemoryVault)
 	inst2.Pressure = 9
-	fragExit := CalculateFragments(inst2.Pressure, inst2.InstabilityBand(), true)
+	fragExit := CalculateFragments(inst2.Pressure, inst2.InstabilityBand(), true, inst2.ObjectiveCompleted, inst2.CoreIntegrity)
 	// snapshot previous fragments value (p2 is a pointer into the runtime map)
 	prev := p2.Fragments
 	rt.applyDungeonRewards(a.ID(), inst2, true)

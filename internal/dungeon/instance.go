@@ -36,6 +36,22 @@ type Instance struct {
 	Decayed map[core.Position]bool
 	// Entities present in this dungeon instance (hostile, reactive)
 	Entities []Entity
+
+	// Objective system (v0.3.8)
+	ObjectiveType      string        // STABILIZE | PURGE | RETRIEVE | HUNT
+	ObjectiveProgress  int           // current progress toward objective
+	ObjectiveTarget    int           // required progress to complete objective
+	ObjectiveCompleted bool
+	// PurgeNodes deterministically derived node positions for PURGE objectives
+	PurgeNodes []core.Position
+	// RetrieveHold is a simple counter for RETRIEVE hold ticks
+	RetrieveHold int
+
+	// Core integrity (0-100). When <=0 the dungeon collapses.
+	CoreIntegrity int
+
+	// Phase drives enrage behavior: NORMAL | ENRAGED
+	Phase string
 }
 
 // EntityKind enumerates minimal enemy types.
@@ -72,20 +88,108 @@ type Entity struct {
 }
 
 func NewInstance(id string, anchor AnchorType) *Instance {
-	return &Instance{
-		ID:            id,
-		Width:         7,
-		Height:        7,
-		Pressure:      0,
-		MaxPressure:   20,
-		ExitStability: 8,
-		Entry:         core.Position{X: 3, Y: 6},
-		Anchor:        core.Position{X: 3, Y: 3},
-		Exit:          core.Position{X: 3, Y: 0},
-		AnchorType:    anchor,
-		Decayed:       make(map[core.Position]bool),
-		Entities:      []Entity{},
+	objectiveType := assignObjectiveType(id)
+	purgeNodes := computePurgeNodes(id, 3)
+	objectiveTarget := objectiveTargetForType(objectiveType, len(purgeNodes))
+	inst := &Instance{
+		ID:                 id,
+		Width:              7,
+		Height:             7,
+		Pressure:           0,
+		MaxPressure:        20,
+		ExitStability:      8,
+		Entry:              core.Position{X: 3, Y: 6},
+		Anchor:             core.Position{X: 3, Y: 3},
+		Exit:               core.Position{X: 3, Y: 0},
+		AnchorType:         anchor,
+		Decayed:            make(map[core.Position]bool),
+		Entities:           []Entity{},
+		ObjectiveType:      objectiveType,
+		ObjectiveProgress:  0,
+		ObjectiveTarget:    objectiveTarget,
+		ObjectiveCompleted: false,
+		PurgeNodes:         purgeNodes,
+		RetrieveHold:       0,
+		CoreIntegrity:      100,
+		Phase:              "NORMAL",
 	}
+	// If this instance is a HUNT objective, spawn a deterministic elite.
+	if inst.ObjectiveType == "HUNT" {
+		// Place elite near anchor deterministically.
+		pos := inst.Anchor
+		if pos.Y-1 >= 0 {
+			pos = core.Position{X: pos.X, Y: pos.Y - 1}
+		}
+		e := Entity{ID: "elite-0", Pos: pos, Kind: EnemyHunter, Aggro: 0}
+		inst.Entities = append(inst.Entities, e)
+	}
+	return inst
+}
+
+// assignObjectiveType deterministically maps an instance ID to one of four objectives.
+func assignObjectiveType(id string) string {
+	key := strings.TrimPrefix(id, "D-")
+	sum := 0
+	for i := 0; i < len(key); i++ {
+		sum += int(key[i])
+	}
+	switch sum % 4 {
+	case 0:
+		return "STABILIZE"
+	case 1:
+		return "PURGE"
+	case 2:
+		return "RETRIEVE"
+	default:
+		return "HUNT"
+	}
+}
+
+func objectiveTargetForType(objectiveType string, purgeNodeCount int) int {
+	switch objectiveType {
+	case "STABILIZE":
+		return 5
+	case "PURGE":
+		if purgeNodeCount < 1 {
+			return 1
+		}
+		return purgeNodeCount
+	case "RETRIEVE":
+		return 2
+	case "HUNT":
+		return 1
+	default:
+		return 1
+	}
+}
+
+// computePurgeNodes deterministically produces `n` node positions inside the dungeon.
+func computePurgeNodes(id string, n int) []core.Position {
+	nodes := make([]core.Position, 0, n)
+	seed := 0
+	for i := 0; i < len(id); i++ {
+		seed += int(id[i])
+	}
+	w := 7 - 2
+	h := 7 - 2
+	if w <= 0 {
+		w = 1
+	}
+	if h <= 0 {
+		h = 1
+	}
+	for i := 0; i < n; i++ {
+		x := 1 + ((seed + i*3) % w)
+		y := 1 + ((seed + i*7) % h)
+		p := core.Position{X: x, Y: y}
+		// avoid anchor/exit
+		if p == (core.Position{X: 3, Y: 3}) || p == (core.Position{X: 3, Y: 0}) {
+			p.X = (p.X % (7 - 2)) + 1
+			p.Y = (p.Y % (7 - 2)) + 1
+		}
+		nodes = append(nodes, p)
+	}
+	return nodes
 }
 
 // AddDefaultEntities seeds the dungeon with the canonical single WRAITH.

@@ -74,6 +74,42 @@ func (r *Runtime) TickOnce() Decisions {
 		}
 		inst.TickWithAnchor(atAnchor, r.tick, cadence)
 
+		// Objective progression (v0.3.8)
+		switch inst.ObjectiveType {
+		case "STABILIZE":
+			if atAnchor && inst.Pressure < inst.MaxPressure {
+				inst.ObjectiveProgress++
+			} else if !atAnchor {
+				inst.ObjectiveProgress = 0
+			}
+			if inst.ObjectiveProgress >= inst.ObjectiveTarget {
+				inst.ObjectiveCompleted = true
+			}
+		case "HUNT":
+			foundElite := false
+			for i := range inst.Entities {
+				if inst.Entities[i].ID == "elite-0" {
+					foundElite = true
+					break
+				}
+			}
+			if !foundElite {
+				inst.ObjectiveProgress = inst.ObjectiveTarget
+				inst.ObjectiveCompleted = true
+			}
+		}
+
+		pressureThreshold := (inst.MaxPressure*80 + 99) / 100
+		progressThreshold := 0
+		if inst.ObjectiveTarget > 0 {
+			progressThreshold = (inst.ObjectiveTarget*80 + 99) / 100
+		}
+		if inst.Pressure >= pressureThreshold || (progressThreshold > 0 && inst.ObjectiveProgress >= progressThreshold) {
+			inst.Phase = "ENRAGED"
+		} else {
+			inst.Phase = "NORMAL"
+		}
+
 		// Entity pipeline: perception -> movement -> effects (one action per tick)
 		// Only run entities if instance still has agents bound.
 		if len(agentIDs) == 0 {
@@ -137,10 +173,14 @@ func (r *Runtime) TickOnce() Decisions {
 
 			// Archetype-specific behavior: Sentinels lock, Wardens move on cadence,
 			// Shades only move in Dangerous+ and phase through walls.
+			sentinelRange := 2
+			if inst.Phase == "ENRAGED" {
+				sentinelRange = 3
+			}
 			switch e.Kind {
 			case dungeon.EntityKind("SENTINEL"):
-				// if player within 2, lock onto player for 3 ticks
-				if nearestAny <= 2 && !e.TargetLocked {
+				// if player within range, lock onto player for 3 ticks
+				if nearestAny <= sentinelRange && !e.TargetLocked {
 					e.TargetLocked = true
 					e.LockTicks = 3
 				}
@@ -184,12 +224,8 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 			}
 
-			// Move one tile per tick, cardinal, cannot pass walls.
+			// Move one tile per step, cardinal, cannot pass walls.
 			if !halt {
-				dx := target.X - e.Pos.X
-				dy := target.Y - e.Pos.Y
-				moved := false
-
 				// movement cadence/permission checks
 				allowMove := true
 				if e.Kind == dungeon.EntityKind("WARDEN") {
@@ -199,41 +235,96 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 				if e.Kind == dungeon.EntityKind("SHADE") {
 					// Shades only move when dungeon Dangerous+ (band >= 2)
-					if inst.InstabilityBand() < 2 {
+					if inst.InstabilityBand() < 2 && inst.Phase != "ENRAGED" {
 						allowMove = false
 					}
+				}
+				if inst.Phase == "ENRAGED" {
+					allowMove = true
 				}
 				if !allowMove {
 					// skip movement
 					continue
 				}
-				if dx != 0 {
-					step := 1
-					if dx < 0 {
-						step = -1
-					}
-					cand := core.Position{X: e.Pos.X + step, Y: e.Pos.Y}
-					// Shades phase through walls
-					if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
-						if _, occ := occupied[cand]; !occ {
-							e.Pos = cand
-							moved = true
+				moveSteps := 1
+				if inst.Phase == "ENRAGED" {
+					moveSteps = 2
+				}
+				for s := 0; s < moveSteps; s++ {
+					dx := target.X - e.Pos.X
+					dy := target.Y - e.Pos.Y
+					moved := false
+					if dx != 0 {
+						step := 1
+						if dx < 0 {
+							step = -1
+						}
+						cand := core.Position{X: e.Pos.X + step, Y: e.Pos.Y}
+						// Shades phase through walls
+						if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
+							if _, occ := occupied[cand]; !occ {
+								e.Pos = cand
+								moved = true
+							}
 						}
 					}
-				}
-				if !moved && dy != 0 {
-					step := 1
-					if dy < 0 {
-						step = -1
-					}
-					cand := core.Position{X: e.Pos.X, Y: e.Pos.Y + step}
-					if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
-						if _, occ := occupied[cand]; !occ {
-							e.Pos = cand
+					if !moved && dy != 0 {
+						step := 1
+						if dy < 0 {
+							step = -1
+						}
+						cand := core.Position{X: e.Pos.X, Y: e.Pos.Y + step}
+						if inst.InBounds(cand) && (e.Kind == dungeon.EntityKind("SHADE") || inst.GlyphAt(cand) != '#') {
+							if _, occ := occupied[cand]; !occ {
+								e.Pos = cand
+							}
 						}
 					}
 				}
 			}
+		}
+
+		if inst.ObjectiveType == "HUNT" {
+			foundElite := false
+			for i := range inst.Entities {
+				if inst.Entities[i].ID == "elite-0" {
+					foundElite = true
+					break
+				}
+			}
+			if !foundElite {
+				inst.ObjectiveProgress = inst.ObjectiveTarget
+				inst.ObjectiveCompleted = true
+			}
+		}
+
+		threshold := inst.MaxPressure * 75 / 100
+		if inst.Pressure >= threshold {
+			inst.CoreIntegrity -= 1
+		}
+		for i := range inst.Entities {
+			if inst.Entities[i].Pos == inst.Anchor {
+				inst.CoreIntegrity -= 2
+				break
+			}
+		}
+		if inst.CoreIntegrity <= 0 {
+			for _, aid := range agentIDs {
+				sigID := r.signalByAgent[aid]
+				if r.board != nil && sigID != "" {
+					r.board.Burn(sigID)
+				}
+				if _, ok := r.dungeonByAgent[aid]; ok {
+					r.applyDungeonRewards(aid, inst, false)
+				}
+				delete(r.dungeonByAgent, aid)
+				delete(r.signalByAgent, aid)
+				r.pendingEvents[aid] = "The core fractures and the dungeon collapses."
+				r.pendingEjects[aid] = "integrity"
+			}
+			inst.Done = true
+			inst.DoneReason = "integrity"
+			continue
 		}
 		// Effects: if any entity adjacent to a player, apply energy -=2
 		for i := range inst.Entities {
@@ -291,6 +382,7 @@ func (r *Runtime) TickOnce() Decisions {
 		aid := a.ID()
 		if d, ok := r.dungeonByAgent[aid]; ok {
 			if d.Pressure >= d.MaxPressure {
+				d.CoreIntegrity -= 10
 				// Forced eject: burn signal, destroy dungeon, apply scar, set event
 				sigID := r.signalByAgent[aid]
 				if r.board != nil && sigID != "" {
@@ -492,7 +584,7 @@ func (r *Runtime) TickOnce() Decisions {
 					for i := range inst.Entities {
 						e := &inst.Entities[i]
 						// Sentinels are immune to hide/distract.
-						if e.Kind == dungeon.EntityKind("SENTINEL") {
+						if e.Kind == dungeon.EntityKind("SENTINEL") || (inst.Phase == "ENRAGED" && e.Kind == dungeon.EntityKind("HUNTER")) {
 							continue
 						}
 						// Hide breaks locks for Wardens/Shades
@@ -505,6 +597,22 @@ func (r *Runtime) TickOnce() Decisions {
 						e.OverrideTicks = hideDur + 1
 					}
 					r.pendingEvents[a.ID()] = "You fade from immediate pursuit."
+				}
+			}
+		}
+		if inDungeon && inst != nil && authoritative == agent.OBSERVE && inst.ObjectiveType == "PURGE" && !inst.ObjectiveCompleted {
+			ap := core.Position{X: pos.X, Y: pos.Y}
+			for i := 0; i < len(inst.PurgeNodes); i++ {
+				if inst.PurgeNodes[i] == ap {
+					inst.PurgeNodes = append(inst.PurgeNodes[:i], inst.PurgeNodes[i+1:]...)
+					inst.ObjectiveProgress++
+					if inst.ObjectiveProgress >= inst.ObjectiveTarget {
+						inst.ObjectiveCompleted = true
+						r.pendingEvents[a.ID()] = "Objective PURGE complete."
+					} else {
+						r.pendingEvents[a.ID()] = "Corruption node purged."
+					}
+					break
 				}
 			}
 		}
@@ -598,6 +706,9 @@ func (r *Runtime) TickOnce() Decisions {
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
 			np := core.Position{X: newPos.X, Y: newPos.Y}
 			if np == d.Exit {
+				if !d.ObjectiveCompleted {
+					r.pendingEvents[a.ID()] = "Objective incomplete."
+				} else {
 				// check agent energy via concrete types
 				energy := agent.MaxEnergy
 				switch at := a.(type) {
@@ -646,6 +757,21 @@ func (r *Runtime) TickOnce() Decisions {
 					// deliver a short confirmation next snapshot (presentation-only)
 					r.pendingEvents[a.ID()] = "You exit the dungeon."
 				}
+				}
+			}
+		}
+
+		if d, ok := r.dungeonByAgent[a.ID()]; ok && d != nil && d.ObjectiveType == "RETRIEVE" {
+			np := core.Position{X: newPos.X, Y: newPos.Y}
+			if np == d.Anchor {
+				d.RetrieveHold++
+			} else {
+				d.RetrieveHold = 0
+			}
+			d.ObjectiveProgress = d.RetrieveHold
+			if d.RetrieveHold >= d.ObjectiveTarget {
+				d.ObjectiveCompleted = true
+				r.pendingEvents[a.ID()] = "Objective RETRIEVE complete."
 			}
 		}
 		r.world.SetPosition(a.ID(), newPos)
@@ -700,7 +826,15 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 
 	inst := dungeon.NewInstance("D-"+signalID, dungeon.AnchorType(string(s.Anchor)))
 	// seed deterministic entities based on signal type and current tick
-	inst.SeedEntitiesForSignal(string(s.Type), r.tick)
+	if inst.ObjectiveType == "HUNT" {
+		pos := inst.Anchor
+		if pos.Y-1 >= 0 {
+			pos = core.Position{X: pos.X, Y: pos.Y - 1}
+		}
+		inst.Entities = []dungeon.Entity{{ID: "elite-0", Pos: pos, Kind: dungeon.EnemyHunter}}
+	} else {
+		inst.SeedEntitiesForSignal(string(s.Type), r.tick)
+	}
 	r.dungeonByAgent[agentID] = inst
 	r.signalByAgent[agentID] = signalID
 	// ensure progress record exists
@@ -834,6 +968,12 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			MaxPressure:     d.MaxPressure,
 			Tick:            snap.Tick,
 			InstabilityBand: band,
+			ObjectiveType:   d.ObjectiveType,
+			ObjectiveProgress: d.ObjectiveProgress,
+			ObjectiveTarget: d.ObjectiveTarget,
+			ObjectiveCompleted: d.ObjectiveCompleted,
+			CoreIntegrity:   d.CoreIntegrity,
+			Phase:           d.Phase,
 			ExitState:       exitState,
 			// Keep legacy fields populated for forward compatibility.
 			ExitStability: d.ExitStability,
@@ -952,6 +1092,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		if !snap.Dungeon.AtExit {
 			snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:not_at_exit")
 		} else {
+			if !d.ObjectiveCompleted {
+				snap.Dungeon.BlockedActions = append(snap.Dungeon.BlockedActions, "exit:objective_incomplete")
+			}
 			// check agent energy
 			energy := agent.MaxEnergy
 			switch at := a.(type) {
@@ -1146,15 +1289,20 @@ func applyEnergyDelta(a agent.Agent, delta int) {
 }
 
 // CalculateFragments deterministically computes fragment rewards for a dungeon run.
-func CalculateFragments(maxPressure int, instabilityBand int, exited bool) int {
+func CalculateFragments(maxPressure int, instabilityBand int, exited bool, objectiveCompleted bool, coreIntegrity int) int {
+	_ = instabilityBand
+	_ = exited
 	base := 2
 	pressureBonus := maxPressure / 3
-	bandBonus := instabilityBand
-	survivalBonus := 0
-	if exited {
-		survivalBonus = 2
+	objectiveBonus := 0
+	if objectiveCompleted {
+		objectiveBonus = 3
 	}
-	return base + pressureBonus + bandBonus + survivalBonus
+	if coreIntegrity < 0 {
+		coreIntegrity = 0
+	}
+	integrityBonus := (coreIntegrity * 2) / 100
+	return base + objectiveBonus + pressureBonus + integrityBonus
 }
 
 // applyDungeonRewards updates progress for the agent and persists it.
@@ -1164,7 +1312,7 @@ func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, ex
 	}
 	maxPressure := inst.Pressure
 	band := inst.InstabilityBand()
-	fragments := CalculateFragments(maxPressure, band, exited)
+	fragments := CalculateFragments(maxPressure, band, exited, inst.ObjectiveCompleted, inst.CoreIntegrity)
 	// ensure progress entry exists
 	p, ok := r.progressByAgent[agentID]
 	if !ok || p == nil {
