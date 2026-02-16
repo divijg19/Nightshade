@@ -91,6 +91,13 @@ type DungeonView struct {
 	// Threat is a short label: LOW / MEDIUM / HIGH
 	Threat string `json:"threat,omitempty"`
 
+	// New v0.3.9 presentation fields
+	Enraged bool   `json:"enraged,omitempty"`
+	BuildLabel string `json:"build_label,omitempty"`
+	WorldEventLabel string `json:"world_event_label,omitempty"`
+	ExitChanneling bool `json:"exit_channeling,omitempty"`
+	ExitChannelTick int  `json:"exit_channel_tick,omitempty"`
+
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
 	ExitState string `json:"exit_state,omitempty"`
 	// Event is a one-shot narration string (populated by server)

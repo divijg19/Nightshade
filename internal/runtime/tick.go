@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/divijg19/Nightshade/internal/agent"
@@ -19,6 +20,9 @@ func (r *Runtime) TickOnce() Decisions {
 	if r.board != nil {
 		r.board.Tick()
 	}
+
+	// World event cycles (v0.3.9): deterministic every 100 ticks
+	// Note: label computed in snapshots when needed to avoid unused state here.
 	// v0.3.5: decrement dungeon-action cooldowns (server-authoritative).
 	for aid, v := range r.hideCooldown {
 		if v > 0 {
@@ -73,6 +77,32 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		}
 		inst.TickWithAnchor(atAnchor, r.tick, cadence)
+
+		// World event effects (v0.3.9)
+		worldCycle := r.tick / 100
+		worldEventIdx := worldCycle % 3
+		if worldEventIdx == 1 {
+			// Stability Drain: extra +1 pressure deterministically
+			inst.Pressure++
+		}
+		if worldEventIdx == 2 {
+			// Hunter Migration: spawn a cycle-identified hunter if not present
+			migID := fmt.Sprintf("migr-%d", worldCycle)
+			found := false
+			for _, e := range inst.Entities {
+				if e.ID == migID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				pos := inst.Anchor
+				if pos.Y-1 >= 0 {
+					pos = core.Position{X: pos.X + 1, Y: pos.Y - 1}
+				}
+				inst.Entities = append(inst.Entities, dungeon.Entity{ID: migID, Pos: pos, Kind: dungeon.EnemyHunter})
+			}
+		}
 
 		// Objective progression (v0.3.8)
 		switch inst.ObjectiveType {
@@ -174,13 +204,23 @@ func (r *Runtime) TickOnce() Decisions {
 			// Archetype-specific behavior: Sentinels lock, Wardens move on cadence,
 			// Shades only move in Dangerous+ and phase through walls.
 			sentinelRange := 2
-			if inst.Phase == "ENRAGED" {
+			if inst.Enraged() {
 				sentinelRange = 3
 			}
 			switch e.Kind {
 			case dungeon.EntityKind("SENTINEL"):
-				// if player within range, lock onto player for 3 ticks
+				// if player within range, lock onto player for N ticks (halved when enraged)
 				if nearestAny <= sentinelRange && !e.TargetLocked {
+					e.TargetLocked = true
+					if inst.Enraged() {
+						e.LockTicks = 2
+					} else {
+						e.LockTicks = 3
+					}
+				}
+			case dungeon.EntityKind("HUNTER"):
+				// Hunters immediately lock when player is visible
+				if nearestVisible != 999 && !e.TargetLocked {
 					e.TargetLocked = true
 					e.LockTicks = 3
 				}
@@ -235,11 +275,11 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 				if e.Kind == dungeon.EntityKind("SHADE") {
 					// Shades only move when dungeon Dangerous+ (band >= 2)
-					if inst.InstabilityBand() < 2 && inst.Phase != "ENRAGED" {
+					if inst.InstabilityBand() < 2 && !inst.Enraged() {
 						allowMove = false
 					}
 				}
-				if inst.Phase == "ENRAGED" {
+				if inst.Enraged() {
 					allowMove = true
 				}
 				if !allowMove {
@@ -247,7 +287,7 @@ func (r *Runtime) TickOnce() Decisions {
 					continue
 				}
 				moveSteps := 1
-				if inst.Phase == "ENRAGED" {
+				if inst.Enraged() {
 					moveSteps = 2
 				}
 				for s := 0; s < moveSteps; s++ {
@@ -584,7 +624,7 @@ func (r *Runtime) TickOnce() Decisions {
 					for i := range inst.Entities {
 						e := &inst.Entities[i]
 						// Sentinels are immune to hide/distract.
-						if e.Kind == dungeon.EntityKind("SENTINEL") || (inst.Phase == "ENRAGED" && e.Kind == dungeon.EntityKind("HUNTER")) {
+						if e.Kind == dungeon.EntityKind("SENTINEL") || (inst.Enraged() && e.Kind == dungeon.EntityKind("HUNTER")) {
 							continue
 						}
 						// Hide breaks locks for Wardens/Shades
@@ -670,6 +710,30 @@ func (r *Runtime) TickOnce() Decisions {
 		if inDungeon {
 			agentDelta := dungeonEnergyDelta(action, band)
 			authDelta := dungeonEnergyDelta(authoritative, band)
+			// v0.3.9: Energy loop tightening
+			// OBSERVE always costs -1 energy; WAIT restores +1 only if not enraged and no TargetLocked enemies
+			if inst != nil {
+				if authoritative == agent.OBSERVE {
+					authDelta = -1
+				}
+				if authoritative == agent.WAIT {
+					// default no restore
+					authDelta = 0
+					if !inst.Enraged() {
+						// check for any target-locked enemies in dungeon
+						locked := false
+						for i := range inst.Entities {
+							if inst.Entities[i].TargetLocked {
+								locked = true
+								break
+							}
+						}
+						if !locked {
+							authDelta = 1
+						}
+					}
+				}
+			}
 			// Skill: Stability Training reduces CRITICAL move penalty by 1
 			if band >= 3 {
 				if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
@@ -700,63 +764,148 @@ func (r *Runtime) TickOnce() Decisions {
 			r.world.Height(),
 		)
 
+		// If agent is inside a dungeon and steps onto a risk node, apply deterministic effects
+		if d, ok := r.dungeonByAgent[a.ID()]; ok && d != nil {
+			np := core.Position{X: newPos.X, Y: newPos.Y}
+			// Fragment Node: award fragments (+2 effective including tick increment)
+			if np == d.FragmentNode {
+				// award deterministic fragments to progress record
+				if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+					bonus := CalculateFragments(d.Pressure, d.InstabilityBand(), false, d.ObjectiveCompleted, d.CoreIntegrity)
+					p.Fragments += bonus
+					_ = persist.SaveProgress(a.ID(), p)
+				}
+				// Pressure already advanced at start of tick; add +1 here so the
+				// net effect of stepping on this node during a tick is +2.
+				d.Pressure += 1
+				// remove node so it cannot be reused
+				d.FragmentNode = core.Position{}
+			}
+			// Corruption Well: reduces pressure (net -2 including tick increment) and increase aggression
+			if np == d.CorruptionWell {
+				// Because pressure was already incremented this tick, reduce by 3
+				// here so the net effect compared to the pre-tick value is -2.
+				d.Pressure -= 3
+				if d.Pressure < 0 {
+					d.Pressure = 0
+				}
+				for i := range d.Entities {
+					d.Entities[i].Aggro += 3
+				}
+				d.CorruptionWell = core.Position{}
+			}
+			// Overcharge: +2 energy and +1 pressure
+			if np == d.OverchargeNode {
+				// award energy to agent via concrete types
+				for _, ag := range r.agents {
+					if ag.ID() != a.ID() {
+						continue
+					}
+					switch at := ag.(type) {
+					case *agent.RemoteHuman:
+						at.AdjustEnergy(4)
+					case *agent.Human:
+						at.AdjustEnergy(4)
+					case *agent.Scripted:
+						at.AdjustEnergy(4)
+					}
+				}
+				d.Pressure += 1
+				d.OverchargeNode = core.Position{}
+			}
+		}
+
 		// If agent is inside a dungeon and attempts to move onto the exit,
 		// treat that as an EXIT attempt (commitment). Enforce band/energy
 		// constraints server-side.
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
 			np := core.Position{X: newPos.X, Y: newPos.Y}
 			if np == d.Exit {
-				if !d.ObjectiveCompleted {
-					r.pendingEvents[a.ID()] = "Objective incomplete."
-				} else {
-				// check agent energy via concrete types
-				energy := agent.MaxEnergy
-				switch at := a.(type) {
-				case *agent.RemoteHuman:
-					energy = at.Energy()
-				case *agent.Human:
-					energy = at.Energy()
-				case *agent.Scripted:
-					energy = at.Energy()
-				}
-				band := d.InstabilityBand()
-				// If in CRITICAL band and exhausted (energy < 1) then exit fails
-				// unless the agent has unlocked `exit_instinct`.
-				if band >= 3 && energy < 1 {
-					allow := false
-					if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
-						if p.UnlockedSkills["exit_instinct"] {
-							allow = true
-						}
-					}
-					if !allow {
-						// silent failure; renderer will be hinted via snapshot.BlockedActions
+				// Enraged exit behavior takes precedence: start channeling when ENRAGED
+				if d.Enraged() {
+					// Start channeling if not already
+					if !d.ExitChanneling {
+						d.ExitChanneling = true
+						d.ExitChannelTick = r.tick
+						r.pendingEvents[a.ID()] = "CHANNELING EXIT..."
 					} else {
-						// allow exit: compute rewards first
-						if r != nil {
-							r.applyDungeonRewards(a.ID(), d, true)
+						// if channel started on prior tick and player remains, check locks
+						if r.tick > d.ExitChannelTick {
+							// if any enemy currently TargetLocked, break channel
+							locked := false
+							for i := range d.Entities {
+								if d.Entities[i].TargetLocked {
+									locked = true
+									break
+								}
+							}
+							if locked {
+								d.ExitChanneling = false
+								r.pendingEvents[a.ID()] = "CHANNEL BROKEN"
+							} else if !d.ObjectiveCompleted {
+								r.pendingEvents[a.ID()] = "Objective incomplete."
+							} else {
+								// complete exit
+								if r != nil {
+									r.applyDungeonRewards(a.ID(), d, true)
+								}
+								d.Pressure = 0
+								d.Done = true
+								d.DoneReason = "exit"
+								delete(r.dungeonByAgent, a.ID())
+								delete(r.signalByAgent, a.ID())
+								r.pendingEvents[a.ID()] = "You exit the dungeon."
+							}
 						}
-						d.Pressure = 0
-						d.Done = true
-						delete(r.dungeonByAgent, a.ID())
-						delete(r.signalByAgent, a.ID())
-						// deliver a short confirmation next snapshot (presentation-only)
-						r.pendingEvents[a.ID()] = "You exit the dungeon."
 					}
 				} else {
-					// Successful exit: reset pressure, mark instance done, remove bindings.
-					// compute rewards first using current pressure/state
-					if r != nil {
-						r.applyDungeonRewards(a.ID(), d, true)
+					// Non-enraged immediate exit behavior (unchanged)
+					// Enforce objective completion before allowing exit.
+					if !d.ObjectiveCompleted {
+						r.pendingEvents[a.ID()] = "Objective incomplete."
+						// do not remove binding
+					} else {
+						energy := agent.MaxEnergy
+						switch at := a.(type) {
+						case *agent.RemoteHuman:
+							energy = at.Energy()
+						case *agent.Human:
+							energy = at.Energy()
+						case *agent.Scripted:
+							energy = at.Energy()
+						}
+						band := d.InstabilityBand()
+						if band >= 3 && energy < 1 {
+							allow := false
+							if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+								if p.UnlockedSkills["exit_instinct"] {
+									allow = true
+								}
+							}
+							if !allow {
+								// silent failure; renderer will be hinted via snapshot.BlockedActions
+							} else {
+								if r != nil {
+									r.applyDungeonRewards(a.ID(), d, true)
+								}
+								d.Pressure = 0
+								d.Done = true
+								delete(r.dungeonByAgent, a.ID())
+								delete(r.signalByAgent, a.ID())
+								r.pendingEvents[a.ID()] = "You exit the dungeon."
+							}
+						} else {
+							if r != nil {
+								r.applyDungeonRewards(a.ID(), d, true)
+							}
+							d.Pressure = 0
+							d.Done = true
+							d.DoneReason = "exit"
+							delete(r.dungeonByAgent, a.ID())
+							delete(r.signalByAgent, a.ID())
+							r.pendingEvents[a.ID()] = "You exit the dungeon."
+						}
 					}
-					d.Pressure = 0
-					d.Done = true
-					d.DoneReason = "exit"
-					delete(r.dungeonByAgent, a.ID())
-					delete(r.signalByAgent, a.ID())
-					// deliver a short confirmation next snapshot (presentation-only)
-					r.pendingEvents[a.ID()] = "You exit the dungeon."
-				}
 				}
 			}
 		}
@@ -963,18 +1112,33 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 		}
 
 		snap.Dungeon = agent.DungeonView{
-			Grid:            grid,
-			Pressure:        d.Pressure,
-			MaxPressure:     d.MaxPressure,
-			Tick:            snap.Tick,
-			InstabilityBand: band,
-			ObjectiveType:   d.ObjectiveType,
-			ObjectiveProgress: d.ObjectiveProgress,
-			ObjectiveTarget: d.ObjectiveTarget,
+			Grid:               grid,
+			Pressure:           d.Pressure,
+			MaxPressure:        d.MaxPressure,
+			Tick:               snap.Tick,
+			InstabilityBand:    band,
+			ObjectiveType:      d.ObjectiveType,
+			ObjectiveProgress:  d.ObjectiveProgress,
+			ObjectiveTarget:    d.ObjectiveTarget,
 			ObjectiveCompleted: d.ObjectiveCompleted,
-			CoreIntegrity:   d.CoreIntegrity,
-			Phase:           d.Phase,
-			ExitState:       exitState,
+			CoreIntegrity:      d.CoreIntegrity,
+			Phase:              d.Phase,
+			Enraged:            d.Enraged(),
+			ExitChanneling:     d.ExitChanneling,
+			ExitChannelTick:    d.ExitChannelTick,
+			WorldEventLabel: func() string {
+				wc := r.tick / 100
+				e := wc % 3
+				switch e {
+				case 0:
+					return "Signal Surge"
+				case 1:
+					return "Stability Drain"
+				default:
+					return "Hunter Migration"
+				}
+			}(),
+			ExitState: exitState,
 			// Keep legacy fields populated for forward compatibility.
 			ExitStability: d.ExitStability,
 			AnchorType:    string(d.AnchorType),
@@ -1144,6 +1308,19 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				active = append(active, k)
 			}
 			snap.Dungeon.ActiveSkillShortNames = active
+
+			// BuildLabel derivation (v0.3.9)
+			if p.UnlockedSkills["anchor_mastery"] {
+				snap.Dungeon.BuildLabel = "Stabilizer"
+			} else if p.UnlockedSkills["extended_distract"] || p.UnlockedSkills["threat_awareness"] {
+				snap.Dungeon.BuildLabel = "Hunter"
+			} else if p.UnlockedSkills["stability_training"] || p.UnlockedSkills["pressure_sense"] {
+				snap.Dungeon.BuildLabel = "Diver"
+			} else if p.UnlockedSkills["endurance_1"] || p.UnlockedSkills["endurance_2"] || p.UnlockedSkills["exit_instinct"] {
+				snap.Dungeon.BuildLabel = "Sentinel"
+			} else {
+				snap.Dungeon.BuildLabel = "Adventurer"
+			}
 			// NextBandThreshold when pressure_sense unlocked
 			if p.UnlockedSkills["pressure_sense"] {
 				// compute next threshold
@@ -1249,27 +1426,15 @@ func computeVisibleTiles(
 // for an action in dungeon mode for the given instability band.
 // This is used to keep the runtime authoritative while allowing agents to
 // mirror costs for UX.
-func dungeonEnergyDelta(action agent.Action, band int) int {
-	extraMove := 0
-	extraObserve := 0
-	waitRestore := agent.WaitEnergyRestore
-	if band >= 1 {
-		extraMove = 1
-	}
-	if band == 1 || band == 2 {
-		extraObserve = 1
-	}
-	if band >= 2 {
-		waitRestore = 0
-	}
-
+func dungeonEnergyDelta(action agent.Action, _ int) int {
+	// v0.3.9: Movement always costs -1. Observe costs -1 (tightened).
 	switch action {
 	case agent.MOVE_N, agent.MOVE_S, agent.MOVE_E, agent.MOVE_W:
-		return -(agent.MoveEnergyCost + extraMove)
+		return -agent.MoveEnergyCost
 	case agent.OBSERVE:
-		return -(agent.ObserveEnergyCost + extraObserve)
+		return -1
 	case agent.WAIT:
-		return waitRestore
+		return agent.WaitEnergyRestore
 	case agent.HIDE:
 		return -2
 	case agent.DISTRACT:
