@@ -52,6 +52,15 @@ type Instance struct {
 
 	// Phase drives enrage behavior: NORMAL | ENRAGED
 	Phase string
+
+	// Exit channeling state (v0.3.9)
+	ExitChanneling bool
+	ExitChannelTick int
+
+	// Deterministic risk nodes (v0.3.9)
+	FragmentNode     core.Position
+	CorruptionWell   core.Position
+	OverchargeNode   core.Position
 }
 
 // EntityKind enumerates minimal enemy types.
@@ -112,7 +121,15 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		RetrieveHold:       0,
 		CoreIntegrity:      100,
 		Phase:              "NORMAL",
+		ExitChanneling:     false,
+		ExitChannelTick:    0,
 	}
+
+	// compute deterministic risk nodes
+	frag, well, over := computeRiskNodes(id)
+	inst.FragmentNode = frag
+	inst.CorruptionWell = well
+	inst.OverchargeNode = over
 	// If this instance is a HUNT objective, spawn a deterministic elite.
 	if inst.ObjectiveType == "HUNT" {
 		// Place elite near anchor deterministically.
@@ -379,4 +396,48 @@ func (d *Instance) RenderASCII() string {
 
 func (d *Instance) String() string {
 	return fmt.Sprintf("dungeon %s pressure=%d exit=%d", d.ID, d.Pressure, d.ExitStability)
+}
+
+// Enraged reports whether this instance is in enraged (critical) state.
+func (d *Instance) Enraged() bool {
+	return d.Pressure >= 16
+}
+
+// computeRiskNodes deterministically produces three distinct node positions
+// for Fragment, Corruption Well, and Overcharge based on the instance id.
+func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
+	seed := 0
+	for i := 0; i < len(id); i++ {
+		seed += int(id[i])
+	}
+	w := 7 - 2
+	h := 7 - 2
+	if w <= 0 {
+		w = 1
+	}
+	if h <= 0 {
+		h = 1
+	}
+	a := core.Position{X: 1 + (seed%w), Y: 1 + ((seed*3)%h)}
+	b := core.Position{X: 1 + ((seed+7)%w), Y: 1 + ((seed*5)%h)}
+	c := core.Position{X: 1 + ((seed+13)%w), Y: 1 + ((seed*11)%h)}
+	// avoid collisions with anchor/exit (3,3) and ensure distinctness
+	safe := func(p core.Position) core.Position {
+		if p == (core.Position{X: 3, Y: 3}) || p == (core.Position{X: 3, Y: 0}) {
+			p.X = (p.X % (7-2)) + 1
+			p.Y = (p.Y % (7-2)) + 1
+		}
+		return p
+	}
+	a = safe(a)
+	b = safe(b)
+	c = safe(c)
+	// ensure uniqueness by nudging if equal
+	if a == b {
+		b.X = (b.X % (7-2)) + 1
+	}
+	if a == c || b == c {
+		c.Y = (c.Y % (7-2)) + 1
+	}
+	return a, b, c
 }

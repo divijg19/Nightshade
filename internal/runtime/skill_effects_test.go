@@ -19,6 +19,8 @@ func setupWithProgress(t *testing.T, agentID string, p *persist.Progress) (*Runt
 	// enter dungeon via signal to get instance bound
 	a.RecvInput <- "ENTER_SIGNAL S000"
 	rt.TickOnce()
+	// Ensure energy clamp to MaxEnergy for deterministic expectations in tests
+	a.AdjustEnergy(agent.MaxEnergy - a.Energy())
 	return rt, a
 }
 

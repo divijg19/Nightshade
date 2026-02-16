@@ -57,26 +57,24 @@ type Frame struct {
 // It does NOT perform any IO.
 func RenderGrid(obs agent.Observation) []string {
 	if obs.Mode == "board" && obs.Board != nil {
-		lines := make([]string, 0, 9)
-		lines = append(lines, "== SIGNAL BOARD ==")
-		// show progression summary
-		lines = append(lines, fmt.Sprintf("Fragments: %d", obs.Fragments))
-		lines = append(lines, fmt.Sprintf("SkillPoints: %d", obs.SkillPoints))
-		lines = append(lines, "Press U to upgrade.")
-		lines = append(lines, "")
+		// compact board UI (v0.3.9)
+		lines := make([]string, 0, 6)
+		// compact header
+		lines = append(lines, fmt.Sprintf("WORLD Epoch %d  Threat %s", obs.Tick/100, obs.Dungeon.Threat))
+		lines = append(lines, "----------------------------------------")
+		// compact signals list (1..5)
 		for i, s := range obs.Board.Signals {
-			cursor := " "
+			active := ""
 			if i == obs.Board.Cursor {
-				cursor = ">"
+				active = "ACTIVE"
 			}
-			lock := ""
-			if s.Locked {
-				lock = " " + ANSIGrayDim + "(locked)" + ANSIReset
+			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%d %s", i+1, s.Type, s.Decay, s.Decay/2, active))
+			if i >= 4 {
+				break
 			}
-			lines = append(lines, fmt.Sprintf("%s [%d] %s  %s  Decay:%d%s", cursor, i+1, s.Type, s.Anchor, s.Decay, lock))
 		}
-		lines = append(lines, "")
-		lines = append(lines, ANSIGrayDim+"Press 1-"+fmt.Sprintf("%d", len(obs.Board.Signals))+" to enter."+ANSIReset)
+		lines = append(lines, "----------------------------------------")
+		lines = append(lines, "Press 1–5 to enter | Q Quick Dive")
 		return lines
 	}
 
@@ -85,29 +83,30 @@ func RenderGrid(obs agent.Observation) []string {
 		if obs.Dungeon == nil {
 			return []string{"(dungeon)"}
 		}
-		// render active build line when present
-		if len(obs.Dungeon.ActiveSkillShortNames) > 0 {
-			skills := agent.AllSkills()
-			names := make([]string, 0, len(obs.Dungeon.ActiveSkillShortNames))
-			for _, id := range obs.Dungeon.ActiveSkillShortNames {
-				if s, ok := skills[id]; ok {
-					names = append(names, s.Name)
-				} else {
-					names = append(names, id)
-				}
-			}
-			lines = append(lines, "Build: "+strings.Join(names, ", "))
+		// pressure HUD redesign (v0.3.9)
+		// Build label
+		if obs.Dungeon.BuildLabel != "" {
+			lines = append(lines, fmt.Sprintf("BUILD: %s", obs.Dungeon.BuildLabel))
 		}
-		if obs.Dungeon.NextBandThreshold > 0 {
-			lines = append(lines, fmt.Sprintf("Next band in %d", obs.Dungeon.NextBandThreshold))
+		// Pressure line with band label
+		bandLabel := obs.Dungeon.InstabilityLabel
+		if bandLabel == "" {
+			bandLabel = "STABLE"
 		}
-		lines = append(lines, fmt.Sprintf("PRESSURE %d / %d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure))
-		if obs.Dungeon.ObjectiveType != "" {
-			lines = append(lines, fmt.Sprintf("OBJECTIVE %s %d/%d", obs.Dungeon.ObjectiveType, obs.Dungeon.ObjectiveProgress, obs.Dungeon.ObjectiveTarget))
+		lines = append(lines, fmt.Sprintf("PRESSURE %d/%d  [%s]", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure, bandLabel))
+		// bar
+		filled := obs.Dungeon.Pressure
+		empty := obs.Dungeon.MaxPressure - obs.Dungeon.Pressure
+		if filled < 0 {
+			filled = 0
 		}
-		if obs.Dungeon.Phase != "" {
-			lines = append(lines, fmt.Sprintf("INTEGRITY %d%%  PHASE %s", obs.Dungeon.CoreIntegrity, obs.Dungeon.Phase))
+		if empty < 0 {
+			empty = 0
 		}
+		bar := strings.Repeat("|", filled) + strings.Repeat("-", empty)
+		lines = append(lines, bar)
+		// Core / Threat
+		lines = append(lines, fmt.Sprintf("CORE %d%%  THREAT: %s", obs.Dungeon.CoreIntegrity, obs.Dungeon.Threat))
 		lines = append(lines, strings.Repeat("-", 7))
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
@@ -142,15 +141,15 @@ func RenderGrid(obs agent.Observation) []string {
 						ev := enemyMap[pos]
 						switch ev.Kind {
 						case "HUNTER":
-							b.WriteString(ANSIRedBright + "w" + ANSIReset)
+							b.WriteString(ANSIRedBright + "H" + ANSIReset)
 						case "SENTINEL":
 							b.WriteString(ANSIYellow + "S" + ANSIReset)
 						case "WARDEN":
 							b.WriteString(ANSIRedBright + "W" + ANSIReset)
 						case "SHADE":
-							b.WriteString(ANSIMagentaDim + "s" + ANSIReset)
+							b.WriteString(ANSIMagentaDim + "D" + ANSIReset)
 						default:
-							b.WriteString(ANSIRedBright + "w" + ANSIReset)
+							b.WriteString(ANSIRedBright + "H" + ANSIReset)
 						}
 						continue
 					}
@@ -165,7 +164,12 @@ func RenderGrid(obs agent.Observation) []string {
 					}
 					b.WriteRune(g)
 				}
-				lines = append(lines, b.String())
+				line := b.String()
+				// pressure jitter: shift grid one char on odd ticks when pressure >= 19
+				if obs.Dungeon.Pressure >= 19 && obs.Tick%2 == 1 {
+					line = " " + line
+				}
+				lines = append(lines, line)
 			}
 		} else {
 			lines = append(lines, "(no grid)")
@@ -335,6 +339,11 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 					narration = append(narration, "Objective incomplete.")
 				}
 			}
+
+				// Channeling exit hint
+				if obs.Dungeon.ExitChanneling {
+					narration = append(narration, "CHANNELING EXIT...")
+				}
 			// One-shot server events (e.g., eject) will be appended globally below.
 		}
 	} else if !opts.Minimal && len(obs.Presence) > 0 {
@@ -368,7 +377,7 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 	if obs.Mode == "dungeon" && obs.Dungeon != nil {
 		for _, ev := range obs.Dungeon.Enemies {
 			if ev.TargetLocked {
-				hud = append(hud, "Enemy locked onto you")
+				hud = append(hud, "LOCKED")
 				break
 			}
 		}
@@ -383,13 +392,23 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 
 	header := "WORLD  " + ANSIGrayDim + fmt.Sprintf("tick %d", obs.Tick) + ANSIReset
 	if obs.Mode == "dungeon" {
-		band := 0
-		if obs.Dungeon != nil {
-			band = obs.Dungeon.InstabilityBand
+		// Show enraged header if present
+		if obs.Dungeon != nil && obs.Dungeon.Enraged {
+			// alternate bold every other tick deterministically
+			colored := ANSIRedBright + "CRITICAL – ENRAGED" + ANSIReset
+			if obs.Tick%2 == 1 {
+				colored = "\x1b[1m" + colored + ANSIReset
+			}
+			header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
+		} else {
+			band := 0
+			if obs.Dungeon != nil {
+				band = obs.Dungeon.InstabilityBand
+			}
+			label, colored := instabilityLabel(band)
+			header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
+			_ = label
 		}
-		label, colored := instabilityLabel(band)
-		header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
-		_ = label
 	}
 
 	return Frame{
