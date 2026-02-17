@@ -57,57 +57,92 @@ type Frame struct {
 // It does NOT perform any IO.
 func RenderGrid(obs agent.Observation) []string {
 	if obs.Mode == "board" && obs.Board != nil {
-		// compact board UI (v0.3.9)
-		lines := make([]string, 0, 6)
-		// compact header
-		lines = append(lines, fmt.Sprintf("WORLD Epoch %d  Threat %s", obs.Tick/100, obs.Dungeon.Threat))
+		lines := make([]string, 0, 8)
+		threat := "LOW"
+		if obs.Dungeon != nil && obs.Dungeon.Threat != "" {
+			threat = obs.Dungeon.Threat
+		}
+		lines = append(lines, fmt.Sprintf("WORLD Epoch %d  Threat %s", obs.Tick/100, threat))
 		lines = append(lines, "----------------------------------------")
-		// compact signals list (1..5)
 		for i, s := range obs.Board.Signals {
 			active := ""
 			if i == obs.Board.Cursor {
-				active = "ACTIVE"
+				active = " [ACTIVE]"
 			}
-			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%d %s", i+1, s.Type, s.Decay, s.Decay/2, active))
+			stability := s.Decay
+			corruption := 12 - s.Decay
+			if corruption < 0 {
+				corruption = 0
+			}
+			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%d%s", i+1, s.Type, stability, corruption, active))
 			if i >= 4 {
 				break
 			}
 		}
 		lines = append(lines, "----------------------------------------")
-		lines = append(lines, "Press 1–5 to enter | Q Quick Dive")
+		if strings.TrimSpace(obs.Event) == "" {
+			lines = append(lines, "Press 1–5 to enter  |  Q Quick Dive  |  R Resume Last")
+		}
 		return lines
 	}
 
 	if obs.Mode == "dungeon" {
-		lines := make([]string, 0, 16)
+		lines := make([]string, 0, 14)
 		if obs.Dungeon == nil {
 			return []string{"(dungeon)"}
 		}
-		// pressure HUD redesign (v0.3.9)
-		// Build label
-		if obs.Dungeon.BuildLabel != "" {
-			lines = append(lines, fmt.Sprintf("BUILD: %s", obs.Dungeon.BuildLabel))
+
+		pressureFilled := obs.Dungeon.Pressure
+		if pressureFilled < 0 {
+			pressureFilled = 0
 		}
-		// Pressure line with band label
-		bandLabel := obs.Dungeon.InstabilityLabel
-		if bandLabel == "" {
-			bandLabel = "STABLE"
+		if pressureFilled > obs.Dungeon.MaxPressure {
+			pressureFilled = obs.Dungeon.MaxPressure
 		}
-		lines = append(lines, fmt.Sprintf("PRESSURE %d/%d  [%s]", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure, bandLabel))
-		// bar
-		filled := obs.Dungeon.Pressure
-		empty := obs.Dungeon.MaxPressure - obs.Dungeon.Pressure
-		if filled < 0 {
-			filled = 0
+		pressureEmpty := obs.Dungeon.MaxPressure - pressureFilled
+		if pressureEmpty < 0 {
+			pressureEmpty = 0
 		}
-		if empty < 0 {
-			empty = 0
+		pressureBar := strings.Repeat("|", pressureFilled) + strings.Repeat("-", pressureEmpty)
+		pressureLabel := fmt.Sprintf("PRESSURE %d/%d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure)
+		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged {
+			pressureLabel = ANSIRedBright + pressureLabel + ANSIReset
+			pressureBar = ANSIRedBright + pressureBar + ANSIReset
 		}
-		bar := strings.Repeat("|", filled) + strings.Repeat("-", empty)
-		lines = append(lines, bar)
-		// Core / Threat
-		lines = append(lines, fmt.Sprintf("CORE %d%%  THREAT: %s", obs.Dungeon.CoreIntegrity, obs.Dungeon.Threat))
-		lines = append(lines, strings.Repeat("-", 7))
+		threat := obs.Dungeon.Threat
+		if threat == "" {
+			threat = "LOW"
+		}
+		lines = append(lines, fmt.Sprintf("%s  %s    CORE %d%%    THREAT %s", pressureLabel, pressureBar, obs.Dungeon.CoreIntegrity, threat))
+
+		eventLine := ""
+		if strings.TrimSpace(obs.Event) != "" {
+			eventLine = strings.TrimSpace(obs.Event)
+		} else if strings.TrimSpace(obs.Dungeon.Event) != "" {
+			eventLine = strings.TrimSpace(obs.Dungeon.Event)
+		} else if obs.Dungeon.ExitChanneling {
+			fill := obs.Tick - obs.Dungeon.ExitChannelTick + 1
+			if fill < 0 {
+				fill = 0
+			}
+			if fill > 5 {
+				fill = 5
+			}
+			eventLine = fmt.Sprintf("EXIT CHANNEL: %s%s", strings.Repeat("█", fill), strings.Repeat("░", 5-fill))
+		}
+		if eventLine != "" {
+			if strings.Contains(eventLine, "\n") {
+				for _, ln := range strings.Split(eventLine, "\n") {
+					ln = strings.TrimSpace(ln)
+					if ln != "" {
+						lines = append(lines, ln)
+					}
+				}
+			} else {
+				lines = append(lines, eventLine)
+			}
+		}
+
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
 			// build enemy lookup map for overlay
@@ -162,19 +197,17 @@ func RenderGrid(obs agent.Observation) []string {
 						b.WriteString(ANSIMagentaDim + "X" + ANSIReset)
 						continue
 					}
+					if g == 'X' && (obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged) {
+						b.WriteString(ANSIRedBright + "X" + ANSIReset)
+						continue
+					}
 					b.WriteRune(g)
 				}
-				line := b.String()
-				// pressure jitter: shift grid one char on odd ticks when pressure >= 19
-				if obs.Dungeon.Pressure >= 19 && obs.Tick%2 == 1 {
-					line = " " + line
-				}
-				lines = append(lines, line)
+				lines = append(lines, b.String())
 			}
 		} else {
 			lines = append(lines, "(no grid)")
 		}
-		lines = append(lines, strings.Repeat("-", 7))
 		return lines
 	}
 
@@ -299,88 +332,26 @@ func maxVisibleWidth(ansiRE *regexp.Regexp, lines []string) int {
 
 func BuildFrameWithOptions(obs agent.Observation, status string, energy int, paranoia int, scars int, opts Options) Frame {
 	grid := RenderGrid(obs)
-	// narration: at most one subtle line
+	// narration: v0.3.10 one-line rule
 	narration := make([]string, 0, 1)
-	if obs.Mode == "dungeon" {
-		if obs.Dungeon != nil {
-			switch obs.Dungeon.InstabilityBand {
-			case 1:
-				narration = append(narration, "The air feels unstable.")
-			case 2:
-				narration = append(narration, "The dungeon resists your presence.")
-			case 3:
-				narration = append(narration, "The dungeon is close to collapse.")
-			}
-			// Distortion narration when navigation is actively distorted.
-			if obs.Dungeon.DistortionActive {
-				narration = append(narration, "Your sense of direction warps for a moment.")
-			}
-			// Present action-cost hints derived from server-provided metadata.
-			if len(obs.Dungeon.ActionCosts) > 0 {
-				if v, ok := obs.Dungeon.ActionCosts["observe"]; ok && v > 0 {
-					narration = append(narration, "OBSERVE costs more energy here.")
-				}
-				if v, ok := obs.Dungeon.ActionCosts["move"]; ok && v > 0 {
-					narration = append(narration, "Movement feels draining.")
-				}
-			}
-			for _, b := range obs.Dungeon.BlockedActions {
-				if b == "wait:norest" || b == "wait:blocked" {
-					narration = append(narration, "No rest here.")
-				}
-				if b == "exit:exhausted" {
-					narration = append(narration, "You are too exhausted to exit.")
-				}
-				if b == "exit:not_at_exit" {
-					// subtle hint only
-					narration = append(narration, "You must reach the exit to leave.")
-				}
-				if b == "exit:objective_incomplete" {
-					narration = append(narration, "Objective incomplete.")
-				}
-			}
-
-				// Channeling exit hint
-				if obs.Dungeon.ExitChanneling {
-					narration = append(narration, "CHANNELING EXIT...")
-				}
-			// One-shot server events (e.g., eject) will be appended globally below.
+	if obs.Mode != "dungeon" {
+		if obs.Event != "" {
+			narration = append(narration, obs.Event)
+		} else if !opts.Minimal && len(obs.Presence) > 0 {
+			narration = append(narration, "You sense presences nearby.")
 		}
-	} else if !opts.Minimal && len(obs.Presence) > 0 {
-		narration = append(narration, "You sense presences nearby.")
 	}
 
-	// Global one-shot event (deliver for any mode)
-	if obs.Event != "" {
-		narration = append(narration, obs.Event)
-	}
-
-	// HUD (compact)
+	// HUD (compact). Dungeon mode keeps top hierarchy minimal.
 	hud := make([]string, 0, 2)
-	hudLabel := color("2;36", "Energy")
-	energyStr := fmt.Sprintf(" %d/%d", energy, 100)
-	if energy < 30 {
-		energyStr = color("1;33", energyStr)
-	}
-	hud = append(hud, fmt.Sprintf("%s%s", hudLabel, energyStr))
-	// Append threat line for dungeon mode when present
-	hud = append(hud, fmt.Sprintf("P %d  S %d  Beliefs %d", paranoia, scars, len(obs.Known)))
-	if obs.Mode == "dungeon" && obs.Dungeon != nil {
-		th := obs.Dungeon.Threat
-		if th == "" {
-			th = "LOW"
+	if obs.Mode != "dungeon" {
+		hudLabel := color("2;36", "Energy")
+		energyStr := fmt.Sprintf(" %d/%d", energy, 100)
+		if energy < 30 {
+			energyStr = color("1;33", energyStr)
 		}
-		hud = append(hud, fmt.Sprintf("THREAT: %s", th))
-	}
-
-	// HUD cue: enemy locked onto you when any visible enemy has an active lock
-	if obs.Mode == "dungeon" && obs.Dungeon != nil {
-		for _, ev := range obs.Dungeon.Enemies {
-			if ev.TargetLocked {
-				hud = append(hud, "LOCKED")
-				break
-			}
-		}
+		hud = append(hud, fmt.Sprintf("%s%s", hudLabel, energyStr))
+		hud = append(hud, fmt.Sprintf("P %d  S %d  Beliefs %d", paranoia, scars, len(obs.Known)))
 	}
 
 	statusLines := splitStatusLines(status)
@@ -392,23 +363,16 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 
 	header := "WORLD  " + ANSIGrayDim + fmt.Sprintf("tick %d", obs.Tick) + ANSIReset
 	if obs.Mode == "dungeon" {
-		// Show enraged header if present
-		if obs.Dungeon != nil && obs.Dungeon.Enraged {
-			// alternate bold every other tick deterministically
-			colored := ANSIRedBright + "CRITICAL – ENRAGED" + ANSIReset
-			if obs.Tick%2 == 1 {
-				colored = "\x1b[1m" + colored + ANSIReset
-			}
-			header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
-		} else {
-			band := 0
-			if obs.Dungeon != nil {
-				band = obs.Dungeon.InstabilityBand
-			}
-			label, colored := instabilityLabel(band)
-			header = fmt.Sprintf("DUNGEON  tick %d  [%s]", obs.Tick, colored)
-			_ = label
+		band := 0
+		if obs.Dungeon != nil {
+			band = obs.Dungeon.InstabilityBand
 		}
+		_, colored := instabilityLabel(band)
+		enrage := ""
+		if obs.Dungeon != nil && obs.Dungeon.Enraged {
+			enrage = "  " + ANSIRedBright + "ENRAGE 1" + ANSIReset
+		}
+		header = fmt.Sprintf("DUNGEON  tick %d   [%s]%s", obs.Tick, colored, enrage)
 	}
 
 	return Frame{

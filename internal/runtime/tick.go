@@ -14,6 +14,40 @@ import (
 
 type Decisions map[string]agent.Action
 
+func narrationPriority(msg string) int {
+	m := strings.ToLower(strings.TrimSpace(msg))
+	switch {
+	case strings.Contains(m, "shatters") || strings.Contains(m, "collapse") || strings.Contains(m, "expel"):
+		return 1
+	case strings.Contains(m, "signal stabilized"):
+		return 2
+	case strings.Contains(m, "channel broken"):
+		return 3
+	case strings.Contains(m, "exit channel"):
+		return 4
+	case strings.Contains(m, "exit blocked"):
+		return 5
+	case strings.Contains(m, "lock"):
+		return 6
+	case strings.Contains(m, "instability surges"):
+		return 7
+	default:
+		return 8
+	}
+}
+
+func (r *Runtime) setPendingEvent(agentID string, msg string) {
+	if strings.TrimSpace(msg) == "" {
+		return
+	}
+	if cur, ok := r.pendingEvents[agentID]; ok {
+		if narrationPriority(msg) >= narrationPriority(cur) {
+			return
+		}
+	}
+	r.pendingEvents[agentID] = msg
+}
+
 func (r *Runtime) TickOnce() Decisions {
 	// Advance non-agent world facts before agents observe.
 	r.world.MoveMarker()
@@ -359,7 +393,7 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 				delete(r.dungeonByAgent, aid)
 				delete(r.signalByAgent, aid)
-				r.pendingEvents[aid] = "The core fractures and the dungeon collapses."
+				r.setPendingEvent(aid, "The signal shatters.")
 				r.pendingEjects[aid] = "integrity"
 			}
 			inst.Done = true
@@ -407,7 +441,7 @@ func (r *Runtime) TickOnce() Decisions {
 									r.applyDungeonRewards(aid, inst, false)
 								}
 								delete(r.dungeonByAgent, aid)
-								r.pendingEvents[aid] = "You collapse and are expelled."
+								r.setPendingEvent(aid, "The signal shatters.")
 								r.pendingEjects[aid] = "collapse"
 							}
 						}
@@ -450,7 +484,7 @@ func (r *Runtime) TickOnce() Decisions {
 				delete(r.dungeonByAgent, aid)
 				delete(r.signalByAgent, aid)
 				// schedule one-shot event and eject flag for next snapshot
-				r.pendingEvents[aid] = "The dungeon collapses and expels you."
+				r.setPendingEvent(aid, "The signal shatters.")
 				r.pendingEjects[aid] = "pressure"
 			}
 		}
@@ -497,10 +531,10 @@ func (r *Runtime) TickOnce() Decisions {
 					r.progressByAgent[a.ID()] = p
 				}
 				if err := agent.UnlockSkill(p, skillID); err != nil {
-					r.pendingEvents[a.ID()] = "Unlock failed: " + err.Error()
+					r.setPendingEvent(a.ID(), "Unlock failed: "+err.Error())
 				} else {
 					_ = persist.SaveProgress(a.ID(), p)
-					r.pendingEvents[a.ID()] = "Skill unlocked."
+					r.setPendingEvent(a.ID(), "Skill unlocked.")
 					// If endurance unlocked, update agent instance cap immediately
 					bonus := 0
 					if p.UnlockedSkills["endurance_2"] {
@@ -636,7 +670,7 @@ func (r *Runtime) TickOnce() Decisions {
 						// set override to desired duration +1
 						e.OverrideTicks = hideDur + 1
 					}
-					r.pendingEvents[a.ID()] = "You fade from immediate pursuit."
+					r.setPendingEvent(a.ID(), "Lock disrupted.")
 				}
 			}
 		}
@@ -648,9 +682,9 @@ func (r *Runtime) TickOnce() Decisions {
 					inst.ObjectiveProgress++
 					if inst.ObjectiveProgress >= inst.ObjectiveTarget {
 						inst.ObjectiveCompleted = true
-						r.pendingEvents[a.ID()] = "Objective PURGE complete."
+						r.setPendingEvent(a.ID(), "Objective PURGE complete.")
 					} else {
-						r.pendingEvents[a.ID()] = "Corruption node purged."
+						r.setPendingEvent(a.ID(), "Instability surges (+1).")
 					}
 					break
 				}
@@ -700,7 +734,7 @@ func (r *Runtime) TickOnce() Decisions {
 						}
 						// overrides set to duration+1 because they decrement at tick start
 						e.OverrideTicks = distDur + 1
-						r.pendingEvents[a.ID()] = "The presence shifts its attention."
+						r.setPendingEvent(a.ID(), "Lock disrupted.")
 					}
 				}
 			}
@@ -778,6 +812,7 @@ func (r *Runtime) TickOnce() Decisions {
 				// Pressure already advanced at start of tick; add +1 here so the
 				// net effect of stepping on this node during a tick is +2.
 				d.Pressure += 1
+				r.setPendingEvent(a.ID(), "Instability surges (+2).")
 				// remove node so it cannot be reused
 				d.FragmentNode = core.Position{}
 			}
@@ -792,6 +827,7 @@ func (r *Runtime) TickOnce() Decisions {
 				for i := range d.Entities {
 					d.Entities[i].Aggro += 3
 				}
+				r.setPendingEvent(a.ID(), "Instability surges (-2).")
 				d.CorruptionWell = core.Position{}
 			}
 			// Overcharge: +2 energy and +1 pressure
@@ -803,14 +839,15 @@ func (r *Runtime) TickOnce() Decisions {
 					}
 					switch at := ag.(type) {
 					case *agent.RemoteHuman:
-						at.AdjustEnergy(4)
+						at.AdjustEnergy(2)
 					case *agent.Human:
-						at.AdjustEnergy(4)
+						at.AdjustEnergy(2)
 					case *agent.Scripted:
-						at.AdjustEnergy(4)
+						at.AdjustEnergy(2)
 					}
 				}
 				d.Pressure += 1
+				r.setPendingEvent(a.ID(), "Instability surges (+1).")
 				d.OverchargeNode = core.Position{}
 			}
 		}
@@ -827,7 +864,7 @@ func (r *Runtime) TickOnce() Decisions {
 					if !d.ExitChanneling {
 						d.ExitChanneling = true
 						d.ExitChannelTick = r.tick
-						r.pendingEvents[a.ID()] = "CHANNELING EXIT..."
+						r.setPendingEvent(a.ID(), "EXIT CHANNEL: █░░░░")
 					} else {
 						// if channel started on prior tick and player remains, check locks
 						if r.tick > d.ExitChannelTick {
@@ -841,9 +878,9 @@ func (r *Runtime) TickOnce() Decisions {
 							}
 							if locked {
 								d.ExitChanneling = false
-								r.pendingEvents[a.ID()] = "CHANNEL BROKEN"
+								r.setPendingEvent(a.ID(), "Channel broken by threat.")
 							} else if !d.ObjectiveCompleted {
-								r.pendingEvents[a.ID()] = "Objective incomplete."
+								r.setPendingEvent(a.ID(), "Exit blocked — objective incomplete.")
 							} else {
 								// complete exit
 								if r != nil {
@@ -854,7 +891,7 @@ func (r *Runtime) TickOnce() Decisions {
 								d.DoneReason = "exit"
 								delete(r.dungeonByAgent, a.ID())
 								delete(r.signalByAgent, a.ID())
-								r.pendingEvents[a.ID()] = "You exit the dungeon."
+								r.setPendingEvent(a.ID(), "Signal stabilized.")
 							}
 						}
 					}
@@ -862,7 +899,7 @@ func (r *Runtime) TickOnce() Decisions {
 					// Non-enraged immediate exit behavior (unchanged)
 					// Enforce objective completion before allowing exit.
 					if !d.ObjectiveCompleted {
-						r.pendingEvents[a.ID()] = "Objective incomplete."
+						r.setPendingEvent(a.ID(), "Exit blocked — objective incomplete.")
 						// do not remove binding
 					} else {
 						energy := agent.MaxEnergy
@@ -892,7 +929,7 @@ func (r *Runtime) TickOnce() Decisions {
 								d.Done = true
 								delete(r.dungeonByAgent, a.ID())
 								delete(r.signalByAgent, a.ID())
-								r.pendingEvents[a.ID()] = "You exit the dungeon."
+								r.setPendingEvent(a.ID(), "Signal stabilized.")
 							}
 						} else {
 							if r != nil {
@@ -903,7 +940,7 @@ func (r *Runtime) TickOnce() Decisions {
 							d.DoneReason = "exit"
 							delete(r.dungeonByAgent, a.ID())
 							delete(r.signalByAgent, a.ID())
-							r.pendingEvents[a.ID()] = "You exit the dungeon."
+							r.setPendingEvent(a.ID(), "Signal stabilized.")
 						}
 					}
 				}
@@ -920,7 +957,7 @@ func (r *Runtime) TickOnce() Decisions {
 			d.ObjectiveProgress = d.RetrieveHold
 			if d.RetrieveHold >= d.ObjectiveTarget {
 				d.ObjectiveCompleted = true
-				r.pendingEvents[a.ID()] = "Objective RETRIEVE complete."
+				r.setPendingEvent(a.ID(), "Objective RETRIEVE complete.")
 			}
 		}
 		r.world.SetPosition(a.ID(), newPos)
@@ -993,6 +1030,14 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 		} else {
 			r.progressByAgent[agentID] = persist.DefaultProgress()
 		}
+	}
+	if p, ok := r.progressByAgent[agentID]; ok && p != nil {
+		p.LastSignalID = signalID
+		if !p.DungeonIntroShown {
+			r.setPendingEvent(agentID, "You are inside a signal.\nPressure rises each tick.\nReach the exit before collapse.")
+			p.DungeonIntroShown = true
+		}
+		_ = persist.SaveProgress(agentID, p)
 	}
 	// initialize run stats
 	r.runStats[agentID] = struct {

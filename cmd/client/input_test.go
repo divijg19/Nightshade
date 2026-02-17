@@ -55,12 +55,12 @@ func TestDescribeActionKey(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		{'w', "move north", true},
-		{'a', "move west", true},
-		{'s', "move south", true},
-		{'d', "move east", true},
-		{'.', "wait", true},
-		{'e', "observe", true},
+		{'w', "Move NORTH (-1)", true},
+		{'a', "Move WEST (-1)", true},
+		{'s', "Move SOUTH (-1)", true},
+		{'d', "Move EAST (-1)", true},
+		{'.', "Wait (+1)", true},
+		{'e', "Observe (-1)", true},
 		{'?', "", false},
 	} {
 		got, ok := describeActionKey(c.in)
@@ -107,5 +107,37 @@ func TestBuildIntrospectionLine(t *testing.T) {
 	line := buildIntrospectionLine(obs)
 	if line == "" {
 		t.Fatalf("expected non-empty introspection line")
+	}
+}
+
+func TestQuickDiveSelectsHighestCorruption(t *testing.T) {
+	signals := []agent.SignalView{
+		{ID: "S000", Decay: 8, Burned: false, Locked: false},
+		{ID: "S001", Decay: 3, Burned: false, Locked: false},
+		{ID: "S002", Decay: 6, Burned: false, Locked: false},
+	}
+	sid, ok := quickDiveSignalID(signals)
+	if !ok {
+		t.Fatalf("expected quick dive signal")
+	}
+	if sid != "S001" {
+		t.Fatalf("expected S001, got %s", sid)
+	}
+}
+
+func TestResumeLastOnlyWhenAvailable(t *testing.T) {
+	signals := []agent.SignalView{
+		{ID: "S000", Burned: false, Locked: false},
+		{ID: "S001", Burned: true, Locked: false},
+		{ID: "S002", Burned: false, Locked: true},
+	}
+	if !canResumeSignal(signals, "S000") {
+		t.Fatalf("expected resume allowed for S000")
+	}
+	if canResumeSignal(signals, "S001") {
+		t.Fatalf("expected resume denied for burned signal")
+	}
+	if canResumeSignal(signals, "S002") {
+		t.Fatalf("expected resume denied for locked signal")
 	}
 }

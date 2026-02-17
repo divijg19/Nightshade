@@ -32,17 +32,17 @@ func actionFromKey(r rune) (string, bool) {
 func describeActionKey(r rune) (string, bool) {
 	switch r {
 	case 'w':
-		return "move north", true
+		return "Move NORTH (-1)", true
 	case 'a':
-		return "move west", true
+		return "Move WEST (-1)", true
 	case 's':
-		return "move south", true
+		return "Move SOUTH (-1)", true
 	case 'd':
-		return "move east", true
+		return "Move EAST (-1)", true
 	case '.':
-		return "wait", true
+		return "Wait (+1)", true
 	case 'e':
-		return "observe", true
+		return "Observe (-1)", true
 	default:
 		return "", false
 	}
@@ -84,4 +84,34 @@ func buildIntrospectionLine(obs agent.Observation) string {
 		}
 	}
 	return fmt.Sprintf("Beliefs: %d  Certain:%d Recent:%d Fading:%d Doubtful:%d Scars:%t", total, certain, recent, fading, doubtful, hasScars)
+}
+
+func quickDiveSignalID(signals []agent.SignalView) (string, bool) {
+	bestIdx := -1
+	bestDecay := 1 << 30
+	for i, s := range signals {
+		if s.Burned || s.Locked {
+			continue
+		}
+		if s.Decay < bestDecay {
+			bestDecay = s.Decay
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return "", false
+	}
+	return signals[bestIdx].ID, true
+}
+
+func canResumeSignal(signals []agent.SignalView, signalID string) bool {
+	if signalID == "" {
+		return false
+	}
+	for _, s := range signals {
+		if s.ID == signalID && !s.Burned && !s.Locked {
+			return true
+		}
+	}
+	return false
 }
