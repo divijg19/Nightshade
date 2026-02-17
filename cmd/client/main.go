@@ -68,7 +68,7 @@ func main() {
 	var history []agent.Observation
 	replayCursor := 0
 	inReplay := false
-	showHelp := true
+	showHelp := false
 
 	opts := render.Options{Minimal: *minimalFlag}
 
@@ -79,11 +79,12 @@ func main() {
 	}
 	var pending *pendingAction
 	energyDeltaToShow := 0
+	lastSignalID := ""
 
 	stdin := bufio.NewReader(os.Stdin)
 
 	helpStatus := func() string {
-		return "Controls: w/a/s/d move  e observe  . wait\nMore: i introspect  [ ] replay  q quit  ? help"
+		return "Controls: w/a/s/d move  e observe  . wait\nMore: i introspect  [ ] replay  Ctrl-C quit  ? help"
 	}
 
 	promptHint := func() string {
@@ -207,8 +208,8 @@ func main() {
 			if showHelp {
 				status = helpStatus()
 			} else if pending != nil {
-				// Resolve “move succeeded” only when the new observation confirms it.
-				resolved := "You " + pending.desc + "."
+				// Resolve action feedback only when the new observation confirms it.
+				resolved := "→ " + pending.desc
 				if pending.key == 'w' || pending.key == 'a' || pending.key == 's' || pending.key == 'd' {
 					dx := obs.Position.X - pending.basePos.X
 					dy := obs.Position.Y - pending.basePos.Y
@@ -218,27 +219,14 @@ func main() {
 					if dy < 0 {
 						dy = -dy
 					}
-					// Success is “moved exactly one tile” regardless of axis conventions.
-					if dx+dy == 1 {
-						resolved = "You " + pending.desc + "."
-					} else {
-						// Intent-only feedback without asserting a new failure state.
-						resolved = "You try to " + pending.desc + "."
+					if dx+dy != 1 {
+						resolved = "Blocked by terrain."
 					}
 				} else {
-					// Non-movement actions are always safe to acknowledge.
-					switch pending.key {
-					case '.':
-						resolved = "You wait."
-					case 'e':
-						resolved = "You observe carefully."
-					}
+					resolved = "→ " + pending.desc
 				}
 				status = resolved
-				if energyDeltaToShow != 0 {
-					status = status + "\n" + fmt.Sprintf("Energy Δ %+d", energyDeltaToShow)
-					energyDeltaToShow = 0
-				}
+				energyDeltaToShow = 0
 				pending = nil
 			} else if energyDeltaToShow != 0 {
 				// Keep the delta for the next acknowledged action, but don't spam.
@@ -256,7 +244,7 @@ func main() {
 					break loopConn
 				}
 				// handle control keys
-				if b == 3 || b == 4 || b == 'q' { // CTRL-C, CTRL-D, or 'q'
+				if b == 3 || b == 4 { // CTRL-C or CTRL-D
 					// restore terminal, clear screen, and exit
 					term.Restore(int(os.Stdin.Fd()), oldState)
 					fmt.Fprint(os.Stdout, "\x1b[2J\x1b[H")
@@ -312,6 +300,34 @@ func main() {
 
 				// v0.3.0: signal selection -> enter signal by number.
 				if lastObs.Mode == "board" && lastObs.Board != nil {
+					if key == 'q' {
+						sid, ok := quickDiveSignalID(lastObs.Board.Signals)
+						if !ok {
+							renderNow(lastObs, "No valid signal for Quick Dive.", true)
+							continue
+						}
+						lastSignalID = sid
+						pending = &pendingAction{key: 'e', desc: "Quick Dive", basePos: lastObs.Position}
+						renderNow(lastObs, "→ Quick Dive", true)
+						_ = nnet.WriteFrame(conn, inputMsg{Type: "input", Key: "ENTER_SIGNAL " + sid})
+						break inputLoop
+					}
+
+					if key == 'r' {
+						if !canResumeSignal(lastObs.Board.Signals, lastSignalID) {
+							if lastSignalID == "" {
+								renderNow(lastObs, "No previous signal to resume.", true)
+								continue
+							}
+							renderNow(lastObs, "Resume unavailable.", true)
+							continue
+						}
+						pending = &pendingAction{key: 'e', desc: "Resume Last", basePos: lastObs.Position}
+						renderNow(lastObs, "→ Resume Last", true)
+						_ = nnet.WriteFrame(conn, inputMsg{Type: "input", Key: "ENTER_SIGNAL " + lastSignalID})
+						break inputLoop
+					}
+
 					if key >= '1' && key <= '9' {
 						idx := int(key - '1')
 						if idx >= 0 && idx < len(lastObs.Board.Signals) {
@@ -319,6 +335,7 @@ func main() {
 								showHelp = false
 							}
 							sid := lastObs.Board.Signals[idx].ID
+							lastSignalID = sid
 							cmd := "ENTER_SIGNAL " + sid
 							desc := "enter signal " + sid
 							pending = &pendingAction{key: 'e', desc: desc, basePos: lastObs.Position}

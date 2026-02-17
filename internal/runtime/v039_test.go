@@ -17,11 +17,8 @@ func setupRTWithAgent(t *testing.T) (*Runtime, *agent.RemoteHuman) {
 	rt := New([]agent.Agent{a})
 	// enter deterministic first signal
 	a.RecvInput <- "ENTER_SIGNAL S000"
-		rt.TickOnce()
-		obs := mustRecvObs(t, a)
-		if obs.Event != "" {
-			t.Logf("obs event: %q", obs.Event)
-		}
+	rt.TickOnce()
+	_ = mustRecvObs(t, a)
 	return rt, a
 }
 
@@ -61,10 +58,10 @@ func TestExitChannelBreaksIfLocked(t *testing.T) {
 	// next tick: channel broken
 	a.RecvInput <- "."
 	rt.TickOnce()
-	// authoritative snapshot should carry the CHANNEL BROKEN event
+	// authoritative snapshot should carry channel break event
 	snap2 := rt.snapshotFor(a, agent.Action(-1))
-	if snap2.Dungeon.Event != "CHANNEL BROKEN" && snap2.Event != "CHANNEL BROKEN" {
-		t.Fatalf("expected CHANNEL BROKEN event, got %q / %q", snap2.Dungeon.Event, snap2.Event)
+	if snap2.Dungeon.Event != "Channel broken by threat." && snap2.Event != "Channel broken by threat." {
+		t.Fatalf("expected channel break event, got %q / %q", snap2.Dungeon.Event, snap2.Event)
 	}
 }
 
@@ -99,6 +96,7 @@ func TestWellReducesPressure(t *testing.T) {
 func TestOverchargeRaisesEnergy(t *testing.T) {
 	rt, a := setupRTWithAgent(t)
 	d := rt.dungeonByAgent[a.ID()]
+	d.Entities = nil
 	d.OverchargeNode = core.Position{X: 2, Y: 2}
 	rt.world.SetPosition(a.ID(), world.Position{X: 2, Y: 3})
 	a.RecvInput <- "w"
@@ -138,17 +136,8 @@ func TestWorldEventCycleDeterministic(t *testing.T) {
 		a.RecvInput <- "."
 		rt.TickOnce()
 		_ = mustRecvObs(t, a)
-		if dcur, ok := rt.dungeonByAgent[a.ID()]; !ok {
-			t.Logf("dungeon unbound at loop tick %d (runtime tick=%d)", i, rt.Tick())
+		if _, ok := rt.dungeonByAgent[a.ID()]; !ok {
 			break
-		} else {
-			// log entities and agent energy for debugging
-			ents := make([]string, 0, len(dcur.Entities))
-			for _, e := range dcur.Entities {
-				ents = append(ents, fmt.Sprintf("%s@%d,%d", e.ID, e.Pos.X, e.Pos.Y))
-			}
-			aenergy := a.Energy()
-			t.Logf("loop %d tick=%d entities=%v energy=%d pressure=%d coreIntegrity=%d", i, rt.Tick(), ents, aenergy, dcur.Pressure, dcur.CoreIntegrity)
 		}
 	}
 	snap2 := rt.snapshotFor(a, agent.Action(-1))

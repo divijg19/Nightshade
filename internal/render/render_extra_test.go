@@ -30,11 +30,9 @@ func TestRender_DecayedTileAndDistortionNarration(t *testing.T) {
 		},
 	}
 	out := RenderForTest(obs)
-	if !strings.Contains(out, "Your sense of direction") && !strings.Contains(out, "warps") {
-		// allow variant wording
-		if !strings.Contains(out, "Your sense of direction") {
-			t.Fatalf("expected distortion narration in render output")
-		}
+	// v0.3.10 keeps one-line narration and does not emit distortion spam.
+	if strings.Contains(out, "warps") {
+		t.Fatalf("expected no distortion narration spam")
 	}
 	if !strings.Contains(out, "~") {
 		t.Fatalf("expected decayed tile '~' in render output")

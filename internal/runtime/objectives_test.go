@@ -162,7 +162,7 @@ func TestExitBlockedBeforeObjectiveCompletion(t *testing.T) {
 		t.Fatalf("expected dungeon binding retained when objective incomplete")
 	}
 	snap := rt.snapshotFor(a, agent.Action(-1))
-	if snap.Event != "Objective incomplete." {
+	if snap.Event != "Exit blocked — objective incomplete." {
 		t.Fatalf("expected objective incomplete event, got %q", snap.Event)
 	}
 }

@@ -11,6 +11,8 @@ type Progress struct {
 	TotalDungeons          int             `json:"total_dungeons"`
 	HighestPressureReached int             `json:"highest_pressure_reached"`
 	UnlockedSkills         map[string]bool `json:"unlocked_skills"`
+	DungeonIntroShown      bool            `json:"dungeon_intro_shown,omitempty"`
+	LastSignalID           string          `json:"last_signal_id,omitempty"`
 }
 
 // defaultProgress returns an initialized Progress structure.
@@ -23,6 +25,8 @@ func defaultProgress() *Progress {
 		TotalDungeons:          0,
 		HighestPressureReached: 0,
 		UnlockedSkills:         map[string]bool{},
+		DungeonIntroShown:      false,
+		LastSignalID:           "",
 	}
 }
 
