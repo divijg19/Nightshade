@@ -14,25 +14,21 @@ import (
 
 type Decisions map[string]agent.Action
 
+const exitChannelRequiredTicks = 1
+
 func narrationPriority(msg string) int {
 	m := strings.ToLower(strings.TrimSpace(msg))
 	switch {
 	case strings.Contains(m, "shatters") || strings.Contains(m, "collapse") || strings.Contains(m, "expel"):
 		return 1
-	case strings.Contains(m, "signal stabilized"):
+	case strings.Contains(m, "signal stabilized") || strings.Contains(m, "channel broken") || strings.Contains(m, "exit blocked"):
 		return 2
-	case strings.Contains(m, "channel broken"):
+	case strings.Contains(m, "enrage"):
 		return 3
-	case strings.Contains(m, "exit channel"):
-		return 4
-	case strings.Contains(m, "exit blocked"):
-		return 5
-	case strings.Contains(m, "lock"):
-		return 6
 	case strings.Contains(m, "instability surges"):
-		return 7
+		return 4
 	default:
-		return 8
+		return 5
 	}
 }
 
@@ -46,6 +42,38 @@ func (r *Runtime) setPendingEvent(agentID string, msg string) {
 		}
 	}
 	r.pendingEvents[agentID] = msg
+}
+
+func threatFromInstance(inst *dungeon.Instance) string {
+	if inst == nil {
+		return "LOW"
+	}
+	band := inst.InstabilityBand()
+	if band >= 3 {
+		return "HIGH"
+	}
+	if len(inst.Entities) >= 2 || band == 2 {
+		return "MEDIUM"
+	}
+	return "LOW"
+}
+
+func (r *Runtime) queueRunSummary(agentID string, inst *dungeon.Instance, resultType string, fragments int) {
+	if inst == nil {
+		return
+	}
+	skillXP := fragments / 10
+	r.runSummaryByAgent[agentID] = &agent.RunSummaryView{
+		ResultType:      resultType,
+		PeakPressure:    inst.PeakPressure,
+		MaxPressure:     inst.MaxPressure,
+		FragmentsGained: fragments,
+		SkillXP:         skillXP,
+		TimeInSignal:    inst.TimeInSignal,
+		ThreatLevel:     threatFromInstance(inst),
+	}
+	r.runSummaryAwaitAck[agentID] = true
+	r.runSummaryShown[agentID] = false
 }
 
 func (r *Runtime) TickOnce() Decisions {
@@ -111,6 +139,10 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		}
 		inst.TickWithAnchor(atAnchor, r.tick, cadence)
+		inst.TimeInSignal++
+		if inst.Pressure > inst.PeakPressure {
+			inst.PeakPressure = inst.Pressure
+		}
 
 		// World event effects (v0.3.9)
 		worldCycle := r.tick / 100
@@ -118,6 +150,9 @@ func (r *Runtime) TickOnce() Decisions {
 		if worldEventIdx == 1 {
 			// Stability Drain: extra +1 pressure deterministically
 			inst.Pressure++
+			if inst.Pressure > inst.PeakPressure {
+				inst.PeakPressure = inst.Pressure
+			}
 		}
 		if worldEventIdx == 2 {
 			// Hunter Migration: spawn a cycle-identified hunter if not present
@@ -383,13 +418,15 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		}
 		if inst.CoreIntegrity <= 0 {
+			inst.ResultType = "shatter"
 			for _, aid := range agentIDs {
 				sigID := r.signalByAgent[aid]
 				if r.board != nil && sigID != "" {
 					r.board.Burn(sigID)
 				}
 				if _, ok := r.dungeonByAgent[aid]; ok {
-					r.applyDungeonRewards(aid, inst, false)
+					fr := r.applyDungeonRewards(aid, inst, false)
+					r.queueRunSummary(aid, inst, "shatter", fr)
 				}
 				delete(r.dungeonByAgent, aid)
 				delete(r.signalByAgent, aid)
@@ -431,6 +468,7 @@ func (r *Runtime) TickOnce() Decisions {
 								energy = at.Energy()
 							}
 							if energy <= 0 {
+								inst.ResultType = "collapse"
 								// schedule forced eject collapse
 								if r.board != nil {
 									// remove bindings
@@ -438,7 +476,8 @@ func (r *Runtime) TickOnce() Decisions {
 								}
 								// apply deterministic rewards for forced-eject
 								if inst, ok := r.dungeonByAgent[aid]; ok {
-									r.applyDungeonRewards(aid, inst, false)
+									fr := r.applyDungeonRewards(aid, inst, false)
+									r.queueRunSummary(aid, inst, "collapse", fr)
 								}
 								delete(r.dungeonByAgent, aid)
 								r.setPendingEvent(aid, "The signal shatters.")
@@ -456,6 +495,7 @@ func (r *Runtime) TickOnce() Decisions {
 		aid := a.ID()
 		if d, ok := r.dungeonByAgent[aid]; ok {
 			if d.Pressure >= d.MaxPressure {
+				d.ResultType = "shatter"
 				d.CoreIntegrity -= 10
 				// Forced eject: burn signal, destroy dungeon, apply scar, set event
 				sigID := r.signalByAgent[aid]
@@ -478,7 +518,8 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 				// apply deterministic rewards for collapse
 				if inst, ok := r.dungeonByAgent[aid]; ok {
-					r.applyDungeonRewards(aid, inst, false)
+					fr := r.applyDungeonRewards(aid, inst, false)
+					r.queueRunSummary(aid, inst, "shatter", fr)
 				}
 				// remove bindings
 				delete(r.dungeonByAgent, aid)
@@ -513,6 +554,15 @@ func (r *Runtime) TickOnce() Decisions {
 	for _, a := range r.agents {
 		if rh, ok := a.(*agent.RemoteHuman); ok {
 			in := <-rh.RecvInput
+			if r.runSummaryAwaitAck[a.ID()] {
+				if strings.TrimSpace(in) == "." {
+					delete(r.runSummaryAwaitAck, a.ID())
+					delete(r.runSummaryByAgent, a.ID())
+					delete(r.runSummaryShown, a.ID())
+				}
+				inputs[a.ID()] = ""
+				continue
+			}
 			// v0.3.0: server-authoritative dungeon commitment command.
 			if signalID, ok2 := parseEnterSignal(in); ok2 {
 				_ = r.tryEnterSignal(a.ID(), signalID)
@@ -812,6 +862,9 @@ func (r *Runtime) TickOnce() Decisions {
 				// Pressure already advanced at start of tick; add +1 here so the
 				// net effect of stepping on this node during a tick is +2.
 				d.Pressure += 1
+				if d.Pressure > d.PeakPressure {
+					d.PeakPressure = d.Pressure
+				}
 				r.setPendingEvent(a.ID(), "Instability surges (+2).")
 				// remove node so it cannot be reused
 				d.FragmentNode = core.Position{}
@@ -847,6 +900,9 @@ func (r *Runtime) TickOnce() Decisions {
 					}
 				}
 				d.Pressure += 1
+				if d.Pressure > d.PeakPressure {
+					d.PeakPressure = d.Pressure
+				}
 				r.setPendingEvent(a.ID(), "Instability surges (+1).")
 				d.OverchargeNode = core.Position{}
 			}
@@ -867,7 +923,7 @@ func (r *Runtime) TickOnce() Decisions {
 						r.setPendingEvent(a.ID(), "EXIT CHANNEL: █░░░░")
 					} else {
 						// if channel started on prior tick and player remains, check locks
-						if r.tick > d.ExitChannelTick {
+						if (r.tick - d.ExitChannelTick) >= exitChannelRequiredTicks {
 							// if any enemy currently TargetLocked, break channel
 							locked := false
 							for i := range d.Entities {
@@ -884,7 +940,9 @@ func (r *Runtime) TickOnce() Decisions {
 							} else {
 								// complete exit
 								if r != nil {
-									r.applyDungeonRewards(a.ID(), d, true)
+									d.ResultType = "stabilized"
+									fr := r.applyDungeonRewards(a.ID(), d, true)
+									r.queueRunSummary(a.ID(), d, "stabilized", fr)
 								}
 								d.Pressure = 0
 								d.Done = true
@@ -923,7 +981,9 @@ func (r *Runtime) TickOnce() Decisions {
 								// silent failure; renderer will be hinted via snapshot.BlockedActions
 							} else {
 								if r != nil {
-									r.applyDungeonRewards(a.ID(), d, true)
+									d.ResultType = "stabilized"
+									fr := r.applyDungeonRewards(a.ID(), d, true)
+									r.queueRunSummary(a.ID(), d, "stabilized", fr)
 								}
 								d.Pressure = 0
 								d.Done = true
@@ -933,7 +993,9 @@ func (r *Runtime) TickOnce() Decisions {
 							}
 						} else {
 							if r != nil {
-								r.applyDungeonRewards(a.ID(), d, true)
+								d.ResultType = "stabilized"
+								fr := r.applyDungeonRewards(a.ID(), d, true)
+								r.queueRunSummary(a.ID(), d, "stabilized", fr)
 							}
 							d.Pressure = 0
 							d.Done = true
@@ -1034,7 +1096,7 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	if p, ok := r.progressByAgent[agentID]; ok && p != nil {
 		p.LastSignalID = signalID
 		if !p.DungeonIntroShown {
-			r.setPendingEvent(agentID, "You are inside a signal.\nPressure rises each tick.\nReach the exit before collapse.")
+			r.setPendingEvent(agentID, "You are entering a signal fragment.\nReach ◇ to stabilize.\nPressure rises every tick.\nEnemies escalate under instability.\nAct quickly.")
 			p.DungeonIntroShown = true
 		}
 		_ = persist.SaveProgress(agentID, p)
@@ -1395,25 +1457,37 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 	// Overworld -> Signal Board snapshot.
 	if r.board != nil {
 		snap.Mode = "board"
+		if sm, ok := r.runSummaryByAgent[a.ID()]; ok && r.runSummaryAwaitAck[a.ID()] {
+			if !r.runSummaryShown[a.ID()] {
+				snap.RunSummary = sm
+				r.runSummaryShown[a.ID()] = true
+			}
+		}
 		cursor := r.boardCursor[a.ID()]
 		sigs := r.board.Signals()
 		views := make([]agent.SignalView, 0, len(sigs))
 		for _, s := range sigs {
+			corruption := 12 - s.DecayTicks
+			if corruption < 0 {
+				corruption = 0
+			}
 			views = append(views, agent.SignalView{
-				ID:       s.ID,
-				Type:     string(s.Type),
-				Anchor:   string(s.Anchor),
-				Zone:     string(s.Zone),
-				Presence: string(s.Presence),
-				Decay:    s.DecayTicks,
-				Locked:   s.LockedBy != "" && s.LockedBy != a.ID(),
-				Burned:   s.Burned,
+				ID:         s.ID,
+				Type:       string(s.Type),
+				Anchor:     string(s.Anchor),
+				Zone:       string(s.Zone),
+				Presence:   string(s.Presence),
+				Decay:      s.DecayTicks,
+				Corruption: corruption,
+				Locked:     s.LockedBy != "" && s.LockedBy != a.ID(),
+				Burned:     s.Burned,
 			})
 		}
 		// attach progression info for board mode
 		if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
 			snap.Fragments = p.Fragments
 			snap.SkillPoints = p.SkillPoints
+			snap.LastSignalID = p.LastSignalID
 			ul := make([]string, 0, len(p.UnlockedSkills))
 			for k := range p.UnlockedSkills {
 				ul = append(ul, k)
@@ -1516,9 +1590,9 @@ func CalculateFragments(maxPressure int, instabilityBand int, exited bool, objec
 }
 
 // applyDungeonRewards updates progress for the agent and persists it.
-func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, exited bool) {
+func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, exited bool) int {
 	if inst == nil {
-		return
+		return 0
 	}
 	maxPressure := inst.Pressure
 	band := inst.InstabilityBand()
@@ -1548,4 +1622,5 @@ func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, ex
 		rs.HighestPressureThisRun = maxPressure
 	}
 	r.runStats[agentID] = rs
+	return fragments
 }

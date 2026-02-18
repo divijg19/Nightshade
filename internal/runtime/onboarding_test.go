@@ -20,7 +20,7 @@ func TestOnboardingOverlayShownOnFirstDungeonOnly(t *testing.T) {
 	a.RecvInput <- "."
 	rt.TickOnce()
 	obs := mustRecvObs(t, a)
-	if !strings.Contains(obs.Event, "You are inside a signal.") {
+	if !strings.Contains(obs.Event, "You are entering a signal fragment.") {
 		t.Fatalf("expected onboarding overlay on first entry, got %q", obs.Event)
 	}
 
@@ -40,7 +40,7 @@ func TestOnboardingOverlayShownOnFirstDungeonOnly(t *testing.T) {
 	a2.RecvInput <- "."
 	rt2.TickOnce()
 	obs2 := mustRecvObs(t, a2)
-	if strings.Contains(obs2.Event, "You are inside a signal.") {
+	if strings.Contains(obs2.Event, "You are entering a signal fragment.") {
 		t.Fatalf("expected onboarding overlay not to repeat")
 	}
 }

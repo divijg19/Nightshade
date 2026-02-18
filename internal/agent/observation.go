@@ -40,6 +40,10 @@ type Observation struct {
 	UnlockedSkills []string `json:"unlocked_skills,omitempty"`
 	// AvailableSkills is populated when server includes the upgrade UI listing
 	AvailableSkills []Skill `json:"available_skills,omitempty"`
+	// LastSignalID is the most recently entered signal id for UI highlighting.
+	LastSignalID string `json:"last_signal_id,omitempty"`
+	// RunSummary is populated for exactly one board frame after dungeon completion.
+	RunSummary *RunSummaryView `json:"run_summary,omitempty"`
 }
 
 // BoardView is a compact, client-facing representation of the server-owned Signal Board.
@@ -50,30 +54,42 @@ type BoardView struct {
 }
 
 type SignalView struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Anchor   string `json:"anchor"`
-	Zone     string `json:"zone"`
-	Presence string `json:"presence"`
-	Decay    int    `json:"decay"`
-	Locked   bool   `json:"locked"`
-	Burned   bool   `json:"burned"`
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	Anchor     string `json:"anchor"`
+	Zone       string `json:"zone"`
+	Presence   string `json:"presence"`
+	Decay      int    `json:"decay"`
+	Corruption int    `json:"corruption,omitempty"`
+	Locked     bool   `json:"locked"`
+	Burned     bool   `json:"burned"`
+}
+
+// RunSummaryView is a presentation-only report emitted after a signal dive ends.
+type RunSummaryView struct {
+	ResultType      string `json:"result_type,omitempty"`
+	PeakPressure    int    `json:"peak_pressure,omitempty"`
+	MaxPressure     int    `json:"max_pressure,omitempty"`
+	FragmentsGained int    `json:"fragments_gained,omitempty"`
+	SkillXP         int    `json:"skill_xp,omitempty"`
+	TimeInSignal    int    `json:"time_in_signal,omitempty"`
+	ThreatLevel     string `json:"threat_level,omitempty"`
 }
 
 // DungeonView is a client-facing view of dungeon pressure/risks.
 // It is presentation-only.
 type DungeonView struct {
-	Grid            [][]rune `json:"grid,omitempty"`
-	Pressure        int      `json:"pressure"`
-	MaxPressure     int      `json:"max_pressure"`
-	Tick            int      `json:"tick"`
-	InstabilityBand int      `json:"instability_band"`
-	ObjectiveType   string   `json:"objective_type,omitempty"`
-	ObjectiveProgress int    `json:"objective_progress,omitempty"`
-	ObjectiveTarget int      `json:"objective_target,omitempty"`
-	ObjectiveCompleted bool  `json:"objective_completed,omitempty"`
-	CoreIntegrity int        `json:"core_integrity,omitempty"`
-	Phase string             `json:"phase,omitempty"`
+	Grid               [][]rune `json:"grid,omitempty"`
+	Pressure           int      `json:"pressure"`
+	MaxPressure        int      `json:"max_pressure"`
+	Tick               int      `json:"tick"`
+	InstabilityBand    int      `json:"instability_band"`
+	ObjectiveType      string   `json:"objective_type,omitempty"`
+	ObjectiveProgress  int      `json:"objective_progress,omitempty"`
+	ObjectiveTarget    int      `json:"objective_target,omitempty"`
+	ObjectiveCompleted bool     `json:"objective_completed,omitempty"`
+	CoreIntegrity      int      `json:"core_integrity,omitempty"`
+	Phase              string   `json:"phase,omitempty"`
 
 	// InstabilityLabel is a human-friendly band label (STABLE/UNSTABLE/DANGEROUS/CRITICAL)
 	InstabilityLabel string          `json:"instability_label,omitempty"`
@@ -92,11 +108,11 @@ type DungeonView struct {
 	Threat string `json:"threat,omitempty"`
 
 	// New v0.3.9 presentation fields
-	Enraged bool   `json:"enraged,omitempty"`
-	BuildLabel string `json:"build_label,omitempty"`
+	Enraged         bool   `json:"enraged,omitempty"`
+	BuildLabel      string `json:"build_label,omitempty"`
 	WorldEventLabel string `json:"world_event_label,omitempty"`
-	ExitChanneling bool `json:"exit_channeling,omitempty"`
-	ExitChannelTick int  `json:"exit_channel_tick,omitempty"`
+	ExitChanneling  bool   `json:"exit_channeling,omitempty"`
+	ExitChannelTick int    `json:"exit_channel_tick,omitempty"`
 
 	// ExitState is a short label: "visible", "flicker", "adjacent", "collapsed", "hidden"
 	ExitState string `json:"exit_state,omitempty"`

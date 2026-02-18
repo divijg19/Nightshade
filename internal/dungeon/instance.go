@@ -38,9 +38,9 @@ type Instance struct {
 	Entities []Entity
 
 	// Objective system (v0.3.8)
-	ObjectiveType      string        // STABILIZE | PURGE | RETRIEVE | HUNT
-	ObjectiveProgress  int           // current progress toward objective
-	ObjectiveTarget    int           // required progress to complete objective
+	ObjectiveType      string // STABILIZE | PURGE | RETRIEVE | HUNT
+	ObjectiveProgress  int    // current progress toward objective
+	ObjectiveTarget    int    // required progress to complete objective
 	ObjectiveCompleted bool
 	// PurgeNodes deterministically derived node positions for PURGE objectives
 	PurgeNodes []core.Position
@@ -54,13 +54,18 @@ type Instance struct {
 	Phase string
 
 	// Exit channeling state (v0.3.9)
-	ExitChanneling bool
+	ExitChanneling  bool
 	ExitChannelTick int
 
 	// Deterministic risk nodes (v0.3.9)
-	FragmentNode     core.Position
-	CorruptionWell   core.Position
-	OverchargeNode   core.Position
+	FragmentNode   core.Position
+	CorruptionWell core.Position
+	OverchargeNode core.Position
+
+	// Run summary tracking (v0.3.11)
+	PeakPressure int
+	TimeInSignal int
+	ResultType   string
 }
 
 // EntityKind enumerates minimal enemy types.
@@ -123,6 +128,9 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		Phase:              "NORMAL",
 		ExitChanneling:     false,
 		ExitChannelTick:    0,
+		PeakPressure:       0,
+		TimeInSignal:       0,
+		ResultType:         "",
 	}
 
 	// compute deterministic risk nodes
@@ -400,7 +408,7 @@ func (d *Instance) String() string {
 
 // Enraged reports whether this instance is in enraged (critical) state.
 func (d *Instance) Enraged() bool {
-	return d.Pressure >= 16
+	return d.Pressure >= 15
 }
 
 // computeRiskNodes deterministically produces three distinct node positions
@@ -418,14 +426,14 @@ func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
 	if h <= 0 {
 		h = 1
 	}
-	a := core.Position{X: 1 + (seed%w), Y: 1 + ((seed*3)%h)}
-	b := core.Position{X: 1 + ((seed+7)%w), Y: 1 + ((seed*5)%h)}
-	c := core.Position{X: 1 + ((seed+13)%w), Y: 1 + ((seed*11)%h)}
+	a := core.Position{X: 1 + (seed % w), Y: 1 + ((seed * 3) % h)}
+	b := core.Position{X: 1 + ((seed + 7) % w), Y: 1 + ((seed * 5) % h)}
+	c := core.Position{X: 1 + ((seed + 13) % w), Y: 1 + ((seed * 11) % h)}
 	// avoid collisions with anchor/exit (3,3) and ensure distinctness
 	safe := func(p core.Position) core.Position {
 		if p == (core.Position{X: 3, Y: 3}) || p == (core.Position{X: 3, Y: 0}) {
-			p.X = (p.X % (7-2)) + 1
-			p.Y = (p.Y % (7-2)) + 1
+			p.X = (p.X % (7 - 2)) + 1
+			p.Y = (p.Y % (7 - 2)) + 1
 		}
 		return p
 	}
@@ -434,10 +442,10 @@ func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
 	c = safe(c)
 	// ensure uniqueness by nudging if equal
 	if a == b {
-		b.X = (b.X % (7-2)) + 1
+		b.X = (b.X % (7 - 2)) + 1
 	}
 	if a == c || b == c {
-		c.Y = (c.Y % (7-2)) + 1
+		c.Y = (c.Y % (7 - 2)) + 1
 	}
 	return a, b, c
 }

@@ -36,6 +36,10 @@ type Runtime struct {
 		FragmentsEarnedThisRun int
 		HighestPressureThisRun int
 	}
+	// v0.3.11 run summary delivery (one-frame, enter-to-dismiss)
+	runSummaryByAgent  map[string]*agent.RunSummaryView
+	runSummaryAwaitAck map[string]bool
+	runSummaryShown    map[string]bool
 }
 
 func New(agents []agent.Agent) *Runtime {
@@ -67,6 +71,9 @@ func New(agents []agent.Agent) *Runtime {
 			FragmentsEarnedThisRun int
 			HighestPressureThisRun int
 		}{},
+		runSummaryByAgent:  map[string]*agent.RunSummaryView{},
+		runSummaryAwaitAck: map[string]bool{},
+		runSummaryShown:    map[string]bool{},
 	}
 	// Preload progress for all agents (backward-compatible: missing files yield defaults)
 	for _, a := range agents {

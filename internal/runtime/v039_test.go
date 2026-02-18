@@ -22,12 +22,12 @@ func setupRTWithAgent(t *testing.T) (*Runtime, *agent.RemoteHuman) {
 	return rt, a
 }
 
-func TestEnrageTriggersAt16_New(t *testing.T) {
+func TestEnrageTriggersAt15_New(t *testing.T) {
 	rt, a := setupRTWithAgent(t)
 	d := rt.dungeonByAgent[a.ID()]
-	d.Pressure = 16
+	d.Pressure = 15
 	if !d.Enraged() {
-		t.Fatalf("expected Enraged true at 16")
+		t.Fatalf("expected Enraged true at 15")
 	}
 	// snapshot reflects enraged
 	snap := rt.snapshotFor(a, agent.Action(-1))
@@ -186,7 +186,7 @@ func TestPressureBarRendering(t *testing.T) {
 	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	plain := re.ReplaceAllString(out, "")
 	// Expect the rendered pressure to reflect current runtime values.
-	expected := fmt.Sprintf("PRESSURE %d/%d", d.Pressure, d.MaxPressure)
+	expected := fmt.Sprintf("%d / %d", d.Pressure, d.MaxPressure)
 	if !regexp.MustCompile(regexp.QuoteMeta(expected)).MatchString(plain) {
 		t.Fatalf("pressure line missing, got %s", plain)
 	}

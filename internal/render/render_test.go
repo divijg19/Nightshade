@@ -186,7 +186,7 @@ func TestDungeonHeader_LabelAndColor(t *testing.T) {
 			},
 		}
 		out := RenderForTest(obs)
-		if !strings.Contains(out, "DUNGEON  tick 42") {
+		if !strings.Contains(out, "DUNGEON tick 42") {
 			t.Fatalf("missing dungeon header")
 		}
 		if !strings.Contains(out, "["+tc.label+"]") {
@@ -234,13 +234,11 @@ func TestDungeonGrid_SubstitutionDeterministic(t *testing.T) {
 	}
 	out := RenderForTest(obs)
 
-	// Band>=2 wall flicker: row0 y=0 with (x+y+tick)%3==0 => x=0,3,6 => "%##%##%"
-	if !strings.Contains(out, "%##%##%") {
-		t.Fatalf("expected wall flicker substitution in output")
+	if !strings.Contains(out, "▓") {
+		t.Fatalf("expected unicode wall glyphs in output")
 	}
-	// Band>=1 floor wobble: row1 y=1 with (x+y+tick)%4==0 => x=3 => "#..~..#"
-	if !strings.Contains(out, "#..~..#") {
-		t.Fatalf("expected floor wobble substitution in output")
+	if !strings.Contains(out, "·") {
+		t.Fatalf("expected unicode floor glyphs in output")
 	}
 
 	// Deterministic: rendering same obs twice is identical.
