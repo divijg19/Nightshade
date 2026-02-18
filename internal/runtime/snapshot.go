@@ -21,6 +21,8 @@ type Snapshot struct {
 	Fragments      int
 	SkillPoints    int
 	UnlockedSkills []string
+	LastSignalID   string
+	RunSummary     *agent.RunSummaryView
 	// AvailableSkills is populated when the client requests upgrade UI
 	AvailableSkills []agent.Skill
 	Dungeon         agent.DungeonView
@@ -70,3 +72,7 @@ func (s Snapshot) FragmentsValue() int                 { return s.Fragments }
 func (s Snapshot) SkillPointsValue() int               { return s.SkillPoints }
 func (s Snapshot) UnlockedSkillsValue() []string       { return s.UnlockedSkills }
 func (s Snapshot) AvailableSkillsValue() []agent.Skill { return s.AvailableSkills }
+func (s Snapshot) LastSignalIDValue() string           { return s.LastSignalID }
+func (s Snapshot) RunSummaryValue() *agent.RunSummaryView {
+	return s.RunSummary
+}

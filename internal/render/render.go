@@ -57,6 +57,25 @@ type Frame struct {
 // It does NOT perform any IO.
 func RenderGrid(obs agent.Observation) []string {
 	if obs.Mode == "board" && obs.Board != nil {
+		if obs.RunSummary != nil {
+			result := strings.Title(obs.RunSummary.ResultType)
+			if result == "" {
+				result = "Unknown"
+			}
+			return []string{
+				"══════════════════════════════",
+				"         SIGNAL REPORT",
+				"══════════════════════════════",
+				fmt.Sprintf("Result: %s", result),
+				fmt.Sprintf("Pressure Peak: %d / %d", obs.RunSummary.PeakPressure, obs.RunSummary.MaxPressure),
+				fmt.Sprintf("Fragments Gained: +%d", obs.RunSummary.FragmentsGained),
+				fmt.Sprintf("Skill XP: +%d", obs.RunSummary.SkillXP),
+				fmt.Sprintf("Time In Signal: %d ticks", obs.RunSummary.TimeInSignal),
+				fmt.Sprintf("Threat Level: %s", obs.RunSummary.ThreatLevel),
+				"",
+				"[Press Enter to return]",
+			}
+		}
 		lines := make([]string, 0, 8)
 		threat := "LOW"
 		if obs.Dungeon != nil && obs.Dungeon.Threat != "" {
@@ -64,24 +83,40 @@ func RenderGrid(obs agent.Observation) []string {
 		}
 		lines = append(lines, fmt.Sprintf("WORLD Epoch %d  Threat %s", obs.Tick/100, threat))
 		lines = append(lines, "----------------------------------------")
+		maxCorruption := -1
+		for _, s := range obs.Board.Signals {
+			if s.Corruption > maxCorruption {
+				maxCorruption = s.Corruption
+			}
+		}
 		for i, s := range obs.Board.Signals {
 			active := ""
 			if i == obs.Board.Cursor {
 				active = " [ACTIVE]"
 			}
-			stability := s.Decay
-			corruption := 12 - s.Decay
+			corruption := s.Corruption
 			if corruption < 0 {
 				corruption = 0
 			}
-			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%d%s", i+1, s.Type, stability, corruption, active))
+			if corruption > 5 {
+				corruption = 5
+			}
+			bar := strings.Repeat("▓", corruption) + strings.Repeat("░", 5-corruption)
+			mark := ""
+			if s.Corruption == maxCorruption {
+				mark = " ★"
+			}
+			if obs.LastSignalID != "" && s.ID == obs.LastSignalID {
+				mark += " ↺"
+			}
+			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%s%s%s", i+1, s.Type, s.Decay, bar, active, mark))
 			if i >= 4 {
 				break
 			}
 		}
 		lines = append(lines, "----------------------------------------")
 		if strings.TrimSpace(obs.Event) == "" {
-			lines = append(lines, "Press 1–5 to enter  |  Q Quick Dive  |  R Resume Last")
+			lines = append(lines, "Q Quick Dive  |  R Resume Last  |  Press 1–5 to enter")
 		}
 		return lines
 	}
@@ -92,54 +127,38 @@ func RenderGrid(obs agent.Observation) []string {
 			return []string{"(dungeon)"}
 		}
 
-		pressureFilled := obs.Dungeon.Pressure
-		if pressureFilled < 0 {
-			pressureFilled = 0
+		segments := 20
+		filled := obs.Dungeon.Pressure
+		if filled < 0 {
+			filled = 0
 		}
-		if pressureFilled > obs.Dungeon.MaxPressure {
-			pressureFilled = obs.Dungeon.MaxPressure
+		if filled > segments {
+			filled = segments
 		}
-		pressureEmpty := obs.Dungeon.MaxPressure - pressureFilled
-		if pressureEmpty < 0 {
-			pressureEmpty = 0
-		}
-		pressureBar := strings.Repeat("|", pressureFilled) + strings.Repeat("-", pressureEmpty)
-		pressureLabel := fmt.Sprintf("PRESSURE %d/%d", obs.Dungeon.Pressure, obs.Dungeon.MaxPressure)
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", segments-filled)
 		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged {
-			pressureLabel = ANSIRedBright + pressureLabel + ANSIReset
-			pressureBar = ANSIRedBright + pressureBar + ANSIReset
+			bar = ANSIRedBright + bar + ANSIReset
 		}
 		threat := obs.Dungeon.Threat
 		if threat == "" {
 			threat = "LOW"
 		}
-		lines = append(lines, fmt.Sprintf("%s  %s    CORE %d%%    THREAT %s", pressureLabel, pressureBar, obs.Dungeon.CoreIntegrity, threat))
-
-		eventLine := ""
-		if strings.TrimSpace(obs.Event) != "" {
-			eventLine = strings.TrimSpace(obs.Event)
-		} else if strings.TrimSpace(obs.Dungeon.Event) != "" {
-			eventLine = strings.TrimSpace(obs.Dungeon.Event)
-		} else if obs.Dungeon.ExitChanneling {
-			fill := obs.Tick - obs.Dungeon.ExitChannelTick + 1
-			if fill < 0 {
-				fill = 0
-			}
-			if fill > 5 {
-				fill = 5
-			}
-			eventLine = fmt.Sprintf("EXIT CHANNEL: %s%s", strings.Repeat("█", fill), strings.Repeat("░", 5-fill))
+		pressureText := fmt.Sprintf("PRESSURE: %s  %d / %d", bar, obs.Dungeon.Pressure, obs.Dungeon.MaxPressure)
+		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged {
+			pressureText = ANSIRedBright + pressureText + ANSIReset
 		}
-		if eventLine != "" {
-			if strings.Contains(eventLine, "\n") {
-				for _, ln := range strings.Split(eventLine, "\n") {
+		lines = append(lines, fmt.Sprintf("%s    CORE %d%%    THREAT %s", pressureText, obs.Dungeon.CoreIntegrity, threat))
+
+		if strings.TrimSpace(obs.Event) != "" {
+			if strings.Contains(obs.Event, "\n") {
+				for _, ln := range strings.Split(obs.Event, "\n") {
 					ln = strings.TrimSpace(ln)
 					if ln != "" {
 						lines = append(lines, ln)
 					}
 				}
 			} else {
-				lines = append(lines, eventLine)
+				lines = append(lines, strings.TrimSpace(obs.Event))
 			}
 		}
 
@@ -166,6 +185,7 @@ func RenderGrid(obs agent.Observation) []string {
 				for x, ch := range row {
 					pos := core.Position{X: x, Y: y}
 					g := applyInstabilityGlyph(ch, band, x, y, obs.Tick)
+					g = unicodeGlyph(g)
 					// center is player
 					if x == int(obs.Position.X) && y == int(obs.Position.Y) {
 						b.WriteString(ANSIWhiteBright + "@" + ANSIReset)
@@ -176,15 +196,15 @@ func RenderGrid(obs agent.Observation) []string {
 						ev := enemyMap[pos]
 						switch ev.Kind {
 						case "HUNTER":
-							b.WriteString(ANSIRedBright + "H" + ANSIReset)
+							b.WriteString(ANSIRedBright + "⚔" + ANSIReset)
 						case "SENTINEL":
-							b.WriteString(ANSIYellow + "S" + ANSIReset)
+							b.WriteString(ANSIYellow + "☣" + ANSIReset)
 						case "WARDEN":
-							b.WriteString(ANSIRedBright + "W" + ANSIReset)
+							b.WriteString(ANSIRedBright + "✶" + ANSIReset)
 						case "SHADE":
-							b.WriteString(ANSIMagentaDim + "D" + ANSIReset)
+							b.WriteString(ANSIMagentaDim + "◌" + ANSIReset)
 						default:
-							b.WriteString(ANSIRedBright + "H" + ANSIReset)
+							b.WriteString(ANSIRedBright + "⚔" + ANSIReset)
 						}
 						continue
 					}
@@ -207,6 +227,20 @@ func RenderGrid(obs agent.Observation) []string {
 			}
 		} else {
 			lines = append(lines, "(no grid)")
+		}
+		if obs.Dungeon.ExitChanneling {
+			fill := obs.Tick - obs.Dungeon.ExitChannelTick + 1
+			if fill < 0 {
+				fill = 0
+			}
+			if fill > 5 {
+				fill = 5
+			}
+			channel := fmt.Sprintf("EXIT CHANNEL: %s%s", strings.Repeat("█", fill), strings.Repeat("░", 5-fill))
+			if obs.Dungeon.InstabilityBand >= 3 {
+				channel = ANSIRedBright + channel + ANSIReset
+			}
+			lines = append(lines, channel)
 		}
 		return lines
 	}
@@ -332,19 +366,16 @@ func maxVisibleWidth(ansiRE *regexp.Regexp, lines []string) int {
 
 func BuildFrameWithOptions(obs agent.Observation, status string, energy int, paranoia int, scars int, opts Options) Frame {
 	grid := RenderGrid(obs)
-	// narration: v0.3.10 one-line rule
-	narration := make([]string, 0, 1)
-	if obs.Mode != "dungeon" {
-		if obs.Event != "" {
-			narration = append(narration, obs.Event)
-		} else if !opts.Minimal && len(obs.Presence) > 0 {
-			narration = append(narration, "You sense presences nearby.")
-		}
+	narration := []string{}
+	if obs.Mode != "dungeon" && strings.TrimSpace(obs.Event) != "" {
+		narration = append(narration, strings.TrimSpace(obs.Event))
 	}
 
-	// HUD (compact). Dungeon mode keeps top hierarchy minimal.
+	// HUD
 	hud := make([]string, 0, 2)
-	if obs.Mode != "dungeon" {
+	if obs.Mode == "dungeon" {
+		hud = append(hud, fmt.Sprintf("Energy %d/100    Fragments %d    Skill Points %d", energy, obs.Fragments, obs.SkillPoints))
+	} else {
 		hudLabel := color("2;36", "Energy")
 		energyStr := fmt.Sprintf(" %d/%d", energy, 100)
 		if energy < 30 {
@@ -370,9 +401,12 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 		_, colored := instabilityLabel(band)
 		enrage := ""
 		if obs.Dungeon != nil && obs.Dungeon.Enraged {
-			enrage = "  " + ANSIRedBright + "ENRAGE 1" + ANSIReset
+			enrage = " ENRAGE"
 		}
-		header = fmt.Sprintf("DUNGEON  tick %d   [%s]%s", obs.Tick, colored, enrage)
+		header = fmt.Sprintf("DUNGEON tick %d [%s%s]", obs.Tick, colored, enrage)
+	}
+	if obs.Mode == "board" && obs.RunSummary != nil {
+		header = "SIGNAL REPORT"
 	}
 
 	return Frame{
@@ -438,6 +472,25 @@ func applyInstabilityGlyph(ch rune, band int, x int, y int, tick int) rune {
 	return out
 }
 
+func unicodeGlyph(ch rune) rune {
+	switch ch {
+	case '#', '%':
+		return '▓'
+	case '.':
+		return '·'
+	case '~':
+		return '·'
+	case 'A':
+		return '◉'
+	case 'X':
+		return '◇'
+	case 'E':
+		return '▲'
+	default:
+		return ch
+	}
+}
+
 // BuildFrame assembles the Frame in memory. No IO.
 func BuildFrame(obs agent.Observation, ephemeral string, energy int, paranoia int, scars int) Frame {
 	return BuildFrameWithOptions(obs, ephemeral, energy, paranoia, scars, Options{})
@@ -487,10 +540,11 @@ func RenderFrame(w io.Writer, f Frame) {
 		frameW = 60
 	}
 	sep := strings.Repeat("-", frameW)
+	isDungeonFrame := strings.HasPrefix(header, "DUNGEON")
 
 	// Header + single separator
 	writeLine(&sb, header)
-	if !f.Options.Minimal {
+	if !f.Options.Minimal && !isDungeonFrame {
 		writeLine(&sb, sep)
 	}
 
@@ -521,7 +575,7 @@ func RenderFrame(w io.Writer, f Frame) {
 	for _, s := range f.Status {
 		writeLine(&sb, s)
 	}
-	if len(f.Status) == 0 && len(f.Narration) == 0 {
+	if len(f.Status) == 0 && len(f.Narration) == 0 && !isDungeonFrame {
 		// keep one breathing line for stable prompt placement
 		writeLine(&sb, "")
 	}
@@ -535,7 +589,7 @@ func RenderFrame(w io.Writer, f Frame) {
 		}
 		writeLine(&sb, out)
 	}
-	if !f.Options.Minimal {
+	if !f.Options.Minimal && !isDungeonFrame {
 		writeLine(&sb, sep)
 	}
 	// Prompt line

@@ -271,6 +271,12 @@ func (r *RemoteHuman) Observe(snapshot Snapshot) {
 	if av, ok := snapshot.(interface{ AvailableSkillsValue() []Skill }); ok {
 		obs.AvailableSkills = av.AvailableSkillsValue()
 	}
+	if lv, ok := snapshot.(interface{ LastSignalIDValue() string }); ok {
+		obs.LastSignalID = lv.LastSignalIDValue()
+	}
+	if rv, ok := snapshot.(interface{ RunSummaryValue() *RunSummaryView }); ok {
+		obs.RunSummary = rv.RunSummaryValue()
+	}
 	// Compute positional presence cues from belief signals (best-effort, non-leaky):
 	// if other agents have emitted belief signals within BeliefRadius, add an
 	// ephemeral PresenceCue. Do not include identities.

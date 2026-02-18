@@ -226,6 +226,9 @@ func main() {
 					resolved = "→ " + pending.desc
 				}
 				status = resolved
+				if energyDeltaToShow != 0 {
+					status = fmt.Sprintf("%s  Energy %d/100 (%+d)", status, lastEnergy, energyDeltaToShow)
+				}
 				energyDeltaToShow = 0
 				pending = nil
 			} else if energyDeltaToShow != 0 {

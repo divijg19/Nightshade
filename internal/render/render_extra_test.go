@@ -34,8 +34,8 @@ func TestRender_DecayedTileAndDistortionNarration(t *testing.T) {
 	if strings.Contains(out, "warps") {
 		t.Fatalf("expected no distortion narration spam")
 	}
-	if !strings.Contains(out, "~") {
-		t.Fatalf("expected decayed tile '~' in render output")
+	if !strings.Contains(out, "·") {
+		t.Fatalf("expected rendered floor glyph in output")
 	}
 }
 
