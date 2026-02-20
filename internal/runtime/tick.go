@@ -1447,7 +1447,7 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			})
 		}
 		snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
-		labels := []string{"Stable", "Unstable", "Dangerous", "Critical"}
+		labels := []string{"STABLE", "UNSTABLE", "DANGEROUS", "CRITICAL"}
 		if band >= 0 && band < len(labels) {
 			snap.Dungeon.InstabilityLabel = labels[band]
 		}
