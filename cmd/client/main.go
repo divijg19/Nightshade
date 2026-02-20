@@ -84,7 +84,7 @@ func main() {
 	stdin := bufio.NewReader(os.Stdin)
 
 	helpStatus := func() string {
-		return "Controls: w/a/s/d move  e observe  . wait\nMore: i introspect  [ ] replay  Ctrl-C quit  ? help"
+		return "Controls: w/a/s/d move  e observe  f ability  . wait\nMore: i introspect  [ ] replay  Ctrl-C quit  ? help"
 	}
 
 	promptHint := func() string {

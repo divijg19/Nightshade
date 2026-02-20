@@ -22,7 +22,7 @@ func normalizeKey(b byte) (rune, bool) {
 
 func actionFromKey(r rune) (string, bool) {
 	switch r {
-	case 'w', 'a', 's', 'd', 'e', '.':
+	case 'w', 'a', 's', 'd', 'e', '.', 'f', '1', '2', '3':
 		return string(r), true
 	default:
 		return "", false
@@ -43,6 +43,14 @@ func describeActionKey(r rune) (string, bool) {
 		return "Wait (+1)", true
 	case 'e':
 		return "Observe (-1)", true
+	case 'f':
+		return "Ability (F)", true
+	case '1':
+		return "Path: Stabilizer", true
+	case '2':
+		return "Path: Harvester", true
+	case '3':
+		return "Path: Aggressor", true
 	default:
 		return "", false
 	}

@@ -61,8 +61,16 @@ type SignalView struct {
 	Presence   string `json:"presence"`
 	Decay      int    `json:"decay"`
 	Corruption int    `json:"corruption,omitempty"`
+	SignalBias string `json:"signal_bias,omitempty"`
 	Locked     bool   `json:"locked"`
 	Burned     bool   `json:"burned"`
+}
+
+type MutatorTileView struct {
+	X        int    `json:"x,omitempty"`
+	Y        int    `json:"y,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Consumed bool   `json:"consumed,omitempty"`
 }
 
 // RunSummaryView is a presentation-only report emitted after a signal dive ends.
@@ -106,6 +114,11 @@ type DungeonView struct {
 	Enemies []EnemyView `json:"enemies,omitempty"`
 	// Threat is a short label: LOW / MEDIUM / HIGH
 	Threat string `json:"threat,omitempty"`
+	// v0.3.12
+	PathType        string            `json:"path_type,omitempty"`
+	AbilityName     string            `json:"ability_name,omitempty"`
+	AbilityCooldown int               `json:"ability_cooldown,omitempty"`
+	MutatorTiles    []MutatorTileView `json:"mutator_tiles,omitempty"`
 
 	// New v0.3.9 presentation fields
 	Enraged         bool   `json:"enraged,omitempty"`
