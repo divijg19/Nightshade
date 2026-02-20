@@ -80,6 +80,11 @@ func keyToActionContext(key string, inDungeon bool) Action {
 		return OBSERVE
 	case '.':
 		return WAIT
+	case 'f':
+		if inDungeon {
+			return USE_ABILITY
+		}
+		return WAIT
 	case 'q':
 		return WAIT
 	default:

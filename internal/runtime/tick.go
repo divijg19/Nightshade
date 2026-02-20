@@ -16,6 +16,45 @@ type Decisions map[string]agent.Action
 
 const exitChannelRequiredTicks = 1
 
+func signalBiasFromID(signalID string) string {
+	sum := 0
+	for i := 0; i < len(signalID); i++ {
+		sum += int(signalID[i]) * (i + 1)
+	}
+	switch sum % 3 {
+	case 0:
+		return string(dungeon.PathStabilizer)
+	case 1:
+		return string(dungeon.PathHarvester)
+	default:
+		return string(dungeon.PathAggressor)
+	}
+}
+
+func parsePathChoice(in string) (dungeon.PathType, bool) {
+	switch strings.TrimSpace(strings.ToLower(in)) {
+	case "1":
+		return dungeon.PathStabilizer, true
+	case "2":
+		return dungeon.PathHarvester, true
+	case "3":
+		return dungeon.PathAggressor, true
+	default:
+		return dungeon.PathUnselected, false
+	}
+}
+
+func fallbackPathFromBias(bias string) dungeon.PathType {
+	switch bias {
+	case string(dungeon.PathHarvester):
+		return dungeon.PathHarvester
+	case string(dungeon.PathAggressor):
+		return dungeon.PathAggressor
+	default:
+		return dungeon.PathStabilizer
+	}
+}
+
 func narrationPriority(msg string) int {
 	m := strings.ToLower(strings.TrimSpace(msg))
 	switch {
@@ -111,6 +150,13 @@ func (r *Runtime) TickOnce() Decisions {
 		}
 	}
 	for inst, agentIDs := range instAgents {
+		if inst.AbilityCooldown > 0 {
+			inst.AbilityCooldown--
+		}
+		if inst.EnemyStunTicks > 0 {
+			inst.EnemyStunTicks--
+		}
+		beforePressure := inst.Pressure
 		// Determine if any occupying agent stands on the anchor
 		atAnchor := false
 		for _, aid := range agentIDs {
@@ -139,6 +185,32 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		}
 		inst.TickWithAnchor(atAnchor, r.tick, cadence)
+		switch inst.RunPhase {
+		case "II":
+			if r.tick%3 == 0 {
+				inst.Pressure++
+			}
+		case "III":
+			if r.tick%2 == 0 {
+				inst.Pressure++
+			}
+		}
+		switch inst.PathType {
+		case dungeon.PathStabilizer:
+			if r.tick%3 == 0 && inst.Pressure > 0 {
+				inst.Pressure--
+			}
+		case dungeon.PathHarvester:
+			if r.tick%4 == 0 {
+				inst.Pressure++
+			}
+		}
+		if inst.SuppressTicks > 0 {
+			if inst.Pressure > beforePressure {
+				inst.Pressure = beforePressure
+			}
+			inst.SuppressTicks--
+		}
 		inst.TimeInSignal++
 		if inst.Pressure > inst.PeakPressure {
 			inst.PeakPressure = inst.Pressure
@@ -223,6 +295,9 @@ func (r *Runtime) TickOnce() Decisions {
 		}
 		for i := range inst.Entities {
 			e := &inst.Entities[i]
+			if inst.EnemyStunTicks > 0 {
+				continue
+			}
 
 			// Override timing: decrement at tick start so overrides last exactly N ticks.
 			if e.OverrideTicks > 0 {
@@ -358,6 +433,9 @@ func (r *Runtime) TickOnce() Decisions {
 				moveSteps := 1
 				if inst.Enraged() {
 					moveSteps = 2
+					if inst.PathType == dungeon.PathAggressor {
+						moveSteps = 3
+					}
 				}
 				for s := 0; s < moveSteps; s++ {
 					dx := target.X - e.Pos.X
@@ -554,6 +632,14 @@ func (r *Runtime) TickOnce() Decisions {
 	for _, a := range r.agents {
 		if rh, ok := a.(*agent.RemoteHuman); ok {
 			in := <-rh.RecvInput
+			if inst, ok := r.dungeonByAgent[a.ID()]; ok {
+				if path, okChoice := parsePathChoice(in); okChoice {
+					inst.SetPath(path)
+					r.setPendingEvent(a.ID(), "Path committed: "+string(path)+".")
+					inputs[a.ID()] = ""
+					continue
+				}
+			}
 			if r.runSummaryAwaitAck[a.ID()] {
 				if strings.TrimSpace(in) == "." {
 					delete(r.runSummaryAwaitAck, a.ID())
@@ -666,7 +752,30 @@ func (r *Runtime) TickOnce() Decisions {
 			}
 		} else {
 			// Dungeon-only actions are invalid outside dungeons.
-			if authoritative == agent.HIDE || authoritative == agent.DISTRACT {
+			if authoritative == agent.HIDE || authoritative == agent.DISTRACT || authoritative == agent.USE_ABILITY {
+				authoritative = agent.WAIT
+			}
+		}
+		if authoritative == agent.USE_ABILITY {
+			if !inDungeon || inst == nil || inst.AbilityCooldown > 0 {
+				authoritative = agent.WAIT
+			} else {
+				switch inst.PathType {
+				case dungeon.PathStabilizer:
+					inst.SuppressTicks = 2
+					r.setPendingEvent(a.ID(), "SUPPRESS engaged.")
+				case dungeon.PathHarvester:
+					if p, ok := r.progressByAgent[a.ID()]; ok && p != nil {
+						p.Fragments += 2
+						_ = persist.SaveProgress(a.ID(), p)
+					}
+					inst.Pressure += 2
+					r.setPendingEvent(a.ID(), "EXTRACT complete (+2 fragments).")
+				case dungeon.PathAggressor:
+					inst.EnemyStunTicks = 1
+					r.setPendingEvent(a.ID(), "OVERDRIVE disrupts enemies.")
+				}
+				inst.AbilityCooldown = 5
 				authoritative = agent.WAIT
 			}
 		}
@@ -851,6 +960,48 @@ func (r *Runtime) TickOnce() Decisions {
 		// If agent is inside a dungeon and steps onto a risk node, apply deterministic effects
 		if d, ok := r.dungeonByAgent[a.ID()]; ok && d != nil {
 			np := core.Position{X: newPos.X, Y: newPos.Y}
+			if d.RunPhase == "I" && (core.Position{X: pos.X, Y: pos.Y}) != d.Anchor && np == d.Anchor {
+				d.RunPhase = "II"
+				r.setPendingEvent(a.ID(), "PHASE II — STABILIZATION")
+				if !d.NestSpawnedPhase {
+					for _, mt := range d.MutatorTiles {
+						if mt.Type == dungeon.MutatorEnemyNest {
+							nestPos := mt.Pos
+							if nestPos.Y+1 < d.Height-1 {
+								nestPos.Y++
+							}
+							d.Entities = append(d.Entities, dungeon.Entity{ID: "nest-" + d.ID, Pos: nestPos, Kind: dungeon.EnemyHunter})
+							break
+						}
+					}
+					d.NestSpawnedPhase = true
+				}
+			}
+			if d.RunPhase == "II" && authoritative == agent.OBSERVE && np == d.Anchor {
+				d.CoreInteracted = true
+				d.RunPhase = "III"
+				d.ObjectiveCompleted = true
+				r.setPendingEvent(a.ID(), "PHASE III — ESCAPE")
+			}
+			if idx, ok := d.MutatorAt(np); ok {
+				mt := &d.MutatorTiles[idx]
+				switch mt.Type {
+				case dungeon.MutatorCorruptionZone:
+					d.Pressure++
+				case dungeon.MutatorStabilization:
+					if !mt.Consumed {
+						if d.Pressure > 0 {
+							d.Pressure--
+						}
+						mt.Consumed = true
+					}
+				case dungeon.MutatorFragileFloor:
+					mt.Steps++
+					if mt.Steps >= 2 {
+						mt.Type = dungeon.MutatorCorruptionZone
+					}
+				}
+			}
 			// Fragment Node: award fragments (+2 effective including tick increment)
 			if np == d.FragmentNode {
 				// award deterministic fragments to progress record
@@ -914,6 +1065,10 @@ func (r *Runtime) TickOnce() Decisions {
 		if d, ok := r.dungeonByAgent[a.ID()]; ok {
 			np := core.Position{X: newPos.X, Y: newPos.Y}
 			if np == d.Exit {
+				requiredTicks := exitChannelRequiredTicks
+				if d.PathType == dungeon.PathStabilizer && requiredTicks > 0 {
+					requiredTicks--
+				}
 				// Enraged exit behavior takes precedence: start channeling when ENRAGED
 				if d.Enraged() {
 					// Start channeling if not already
@@ -921,9 +1076,20 @@ func (r *Runtime) TickOnce() Decisions {
 						d.ExitChanneling = true
 						d.ExitChannelTick = r.tick
 						r.setPendingEvent(a.ID(), "EXIT CHANNEL: █░░░░")
+						if requiredTicks == 0 && d.ObjectiveCompleted {
+							d.ResultType = "stabilized"
+							fr := r.applyDungeonRewards(a.ID(), d, true)
+							r.queueRunSummary(a.ID(), d, "stabilized", fr)
+							d.Pressure = 0
+							d.Done = true
+							d.DoneReason = "exit"
+							delete(r.dungeonByAgent, a.ID())
+							delete(r.signalByAgent, a.ID())
+							r.setPendingEvent(a.ID(), "Signal stabilized.")
+						}
 					} else {
 						// if channel started on prior tick and player remains, check locks
-						if (r.tick - d.ExitChannelTick) >= exitChannelRequiredTicks {
+						if (r.tick - d.ExitChannelTick) >= requiredTicks {
 							// if any enemy currently TargetLocked, break channel
 							locked := false
 							for i := range d.Entities {
@@ -1073,6 +1239,9 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	}
 
 	inst := dungeon.NewInstance("D-"+signalID, dungeon.AnchorType(string(s.Anchor)))
+	inst.SetSignalBias(signalID)
+	inst.SetPath(fallbackPathFromBias(inst.SignalBias))
+	inst.SeedMutators(signalID)
 	// seed deterministic entities based on signal type and current tick
 	if inst.ObjectiveType == "HUNT" {
 		pos := inst.Anchor
@@ -1096,8 +1265,10 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	if p, ok := r.progressByAgent[agentID]; ok && p != nil {
 		p.LastSignalID = signalID
 		if !p.DungeonIntroShown {
-			r.setPendingEvent(agentID, "You are entering a signal fragment.\nReach ◇ to stabilize.\nPressure rises every tick.\nEnemies escalate under instability.\nAct quickly.")
+			r.setPendingEvent(agentID, "You are entering a signal fragment.\nChoose Path:\n[1] Stabilizer\n[2] Harvester\n[3] Aggressor")
 			p.DungeonIntroShown = true
+		} else {
+			r.setPendingEvent(agentID, "Choose Path:\n[1] Stabilizer\n[2] Harvester\n[3] Aggressor")
 		}
 		_ = persist.SaveProgress(agentID, p)
 	}
@@ -1230,6 +1401,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			ObjectiveCompleted: d.ObjectiveCompleted,
 			CoreIntegrity:      d.CoreIntegrity,
 			Phase:              d.Phase,
+			PathType:           string(d.PathType),
+			AbilityName:        d.AbilityName,
+			AbilityCooldown:    d.AbilityCooldown,
 			Enraged:            d.Enraged(),
 			ExitChanneling:     d.ExitChanneling,
 			ExitChannelTick:    d.ExitChannelTick,
@@ -1252,18 +1426,31 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 			AtAnchor:      snap.Position == d.Anchor,
 			AtExit:        snap.Position == d.Exit,
 		}
+		snap.PathType = string(d.PathType)
+		snap.Phase = d.RunPhase
+		snap.AbilityCooldown = d.AbilityCooldown
+		snap.SignalBias = d.SignalBias
+		snap.Dungeon.Phase = d.RunPhase
 
-			// Populate decayed tiles slice for presentation and report distortion state.
-			decayed := make([]core.Position, 0, len(d.Decayed))
-			for p := range d.Decayed {
-				decayed = append(decayed, p)
-			}
-			snap.Dungeon.DecayedTiles = decayed
-			snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
-			labels := []string{"STABLE", "UNSTABLE", "DANGEROUS", "CRITICAL"}
-			if band >= 0 && band < len(labels) {
-				snap.Dungeon.InstabilityLabel = labels[band]
-			}
+		// Populate decayed tiles slice for presentation and report distortion state.
+		decayed := make([]core.Position, 0, len(d.Decayed))
+		for p := range d.Decayed {
+			decayed = append(decayed, p)
+		}
+		snap.Dungeon.DecayedTiles = decayed
+		for _, mt := range d.MutatorTiles {
+			snap.Dungeon.MutatorTiles = append(snap.Dungeon.MutatorTiles, agent.MutatorTileView{
+				X:        mt.Pos.X,
+				Y:        mt.Pos.Y,
+				Type:     string(mt.Type),
+				Consumed: mt.Consumed,
+			})
+		}
+		snap.Dungeon.DistortionActive = d.Pressure >= 11 && r.tick%3 == 0
+		labels := []string{"STABLE", "UNSTABLE", "DANGEROUS", "CRITICAL"}
+		if band >= 0 && band < len(labels) {
+			snap.Dungeon.InstabilityLabel = labels[band]
+		}
 
 		// Provide presentation-only action cost hints and blocked-action reasons
 		snap.Dungeon.ActionCosts = map[string]int{}
@@ -1479,6 +1666,7 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 				Presence:   string(s.Presence),
 				Decay:      s.DecayTicks,
 				Corruption: corruption,
+				SignalBias: signalBiasFromID(s.ID),
 				Locked:     s.LockedBy != "" && s.LockedBy != a.ID(),
 				Burned:     s.Burned,
 			})
@@ -1597,6 +1785,12 @@ func (r *Runtime) applyDungeonRewards(agentID string, inst *dungeon.Instance, ex
 	maxPressure := inst.Pressure
 	band := inst.InstabilityBand()
 	fragments := CalculateFragments(maxPressure, band, exited, inst.ObjectiveCompleted, inst.CoreIntegrity)
+	if inst.PathType == dungeon.PathHarvester {
+		fragments = fragments * 2
+		if inst.SignalBias == string(dungeon.PathHarvester) {
+			fragments += 1
+		}
+	}
 	// ensure progress entry exists
 	p, ok := r.progressByAgent[agentID]
 	if !ok || p == nil {

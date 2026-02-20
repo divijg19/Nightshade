@@ -109,7 +109,11 @@ func RenderGrid(obs agent.Observation) []string {
 			if obs.LastSignalID != "" && s.ID == obs.LastSignalID {
 				mark += " ↺"
 			}
-			lines = append(lines, fmt.Sprintf("[%d] %s  S:%d  C:%s%s%s", i+1, s.Type, s.Decay, bar, active, mark))
+			bias := ""
+			if s.SignalBias != "" {
+				bias = fmt.Sprintf(" (%s Bias)", strings.Title(strings.ToLower(s.SignalBias)))
+			}
+			lines = append(lines, fmt.Sprintf("[%d] %s%s  S:%d  C:%s%s%s", i+1, s.Type, bias, s.Decay, bar, active, mark))
 			if i >= 4 {
 				break
 			}
@@ -127,6 +131,21 @@ func RenderGrid(obs agent.Observation) []string {
 			return []string{"(dungeon)"}
 		}
 
+		path := obs.Dungeon.PathType
+		if path == "" {
+			path = "UNSELECTED"
+		}
+		phase := obs.Dungeon.Phase
+		phaseLabel := "I — APPROACH"
+		switch phase {
+		case "II":
+			phaseLabel = "II — STABILIZATION"
+		case "III":
+			phaseLabel = "III — ESCAPE"
+		}
+		lines = append(lines, fmt.Sprintf("PATH: %s", path))
+		lines = append(lines, fmt.Sprintf("PHASE: %s", phaseLabel))
+
 		segments := 20
 		filled := obs.Dungeon.Pressure
 		if filled < 0 {
@@ -136,7 +155,7 @@ func RenderGrid(obs agent.Observation) []string {
 			filled = segments
 		}
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", segments-filled)
-		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged {
+		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged || obs.Dungeon.Phase == "III" {
 			bar = ANSIRedBright + bar + ANSIReset
 		}
 		threat := obs.Dungeon.Threat
@@ -144,10 +163,11 @@ func RenderGrid(obs agent.Observation) []string {
 			threat = "LOW"
 		}
 		pressureText := fmt.Sprintf("PRESSURE: %s  %d / %d", bar, obs.Dungeon.Pressure, obs.Dungeon.MaxPressure)
-		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged {
+		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged || obs.Dungeon.Phase == "III" {
 			pressureText = ANSIRedBright + pressureText + ANSIReset
 		}
 		lines = append(lines, fmt.Sprintf("%s    CORE %d%%    THREAT %s", pressureText, obs.Dungeon.CoreIntegrity, threat))
+		lines = append(lines, fmt.Sprintf("ABILITY: %s  CD %d", obs.Dungeon.AbilityName, obs.Dungeon.AbilityCooldown))
 
 		if strings.TrimSpace(obs.Event) != "" {
 			if strings.Contains(obs.Event, "\n") {
@@ -164,6 +184,10 @@ func RenderGrid(obs agent.Observation) []string {
 
 		if len(obs.Dungeon.Grid) > 0 {
 			band := obs.Dungeon.InstabilityBand
+			mutatorMap := map[core.Position]agent.MutatorTileView{}
+			for _, mt := range obs.Dungeon.MutatorTiles {
+				mutatorMap[core.Position{X: mt.X, Y: mt.Y}] = mt
+			}
 			// build enemy lookup map for overlay
 			enemyMap := map[core.Position]agent.EnemyView{}
 			distractedAnchor := false
@@ -208,6 +232,25 @@ func RenderGrid(obs agent.Observation) []string {
 						}
 						continue
 					}
+					if mt, ok := mutatorMap[pos]; ok {
+						switch mt.Type {
+						case "CORRUPTION_ZONE":
+							b.WriteString(ANSIRedBright + "☠" + ANSIReset)
+						case "STABILIZATION_FIELD":
+							if mt.Consumed {
+								b.WriteString(ANSIGrayDim + "✚" + ANSIReset)
+							} else {
+								b.WriteString(ANSIYellowBright + "✚" + ANSIReset)
+							}
+						case "FRAGILE_FLOOR":
+							b.WriteString(ANSICyan + "⧈" + ANSIReset)
+						case "ENEMY_NEST":
+							b.WriteString(ANSIMagentaDim + "✸" + ANSIReset)
+						default:
+							b.WriteRune(g)
+						}
+						continue
+					}
 					// v0.3.5: subtle cue when an enemy is distracted toward anchor/exit.
 					if distractedAnchor && g == 'A' {
 						b.WriteString(ANSIMagentaDim + "A" + ANSIReset)
@@ -220,6 +263,26 @@ func RenderGrid(obs agent.Observation) []string {
 					if g == 'X' && (obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged) {
 						b.WriteString(ANSIRedBright + "X" + ANSIReset)
 						continue
+					}
+					if obs.Dungeon.Phase == "II" {
+						if g == '◉' {
+							b.WriteString(ANSIYellowBright + string(g) + ANSIReset)
+							continue
+						}
+						if g == '·' {
+							b.WriteString(ANSICyan + string(g) + ANSIReset)
+							continue
+						}
+					}
+					if obs.Dungeon.Phase == "III" {
+						if g == '▓' {
+							b.WriteString(ANSIGrayDim + string(g) + ANSIReset)
+							continue
+						}
+						if (x+y+obs.Tick)%2 == 0 && g == '·' {
+							b.WriteString(ANSIYellowDim + string(g) + ANSIReset)
+							continue
+						}
 					}
 					b.WriteRune(g)
 				}

@@ -9,16 +9,17 @@ type Agent interface {
 }
 
 const (
-	MOVE_N   Action = 0
-	MOVE_S   Action = 1
-	MOVE_E   Action = 2
-	MOVE_W   Action = 3
-	GATHER   Action = 4
-	ATTACK   Action = 5
-	OBSERVE  Action = 6
-	WAIT     Action = 7
-	HIDE     Action = 8
-	DISTRACT Action = 9
+	MOVE_N      Action = 0
+	MOVE_S      Action = 1
+	MOVE_E      Action = 2
+	MOVE_W      Action = 3
+	GATHER      Action = 4
+	ATTACK      Action = 5
+	OBSERVE     Action = 6
+	WAIT        Action = 7
+	HIDE        Action = 8
+	DISTRACT    Action = 9
+	USE_ABILITY Action = 10
 )
 
 // CautionThreshold defines how many ticks since last observation make a

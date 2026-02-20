@@ -18,11 +18,15 @@ type Snapshot struct {
 	Mode  string
 	Board agent.BoardView
 	// Board-mode progression hints
-	Fragments      int
-	SkillPoints    int
-	UnlockedSkills []string
-	LastSignalID   string
-	RunSummary     *agent.RunSummaryView
+	Fragments       int
+	SkillPoints     int
+	UnlockedSkills  []string
+	LastSignalID    string
+	RunSummary      *agent.RunSummaryView
+	PathType        string
+	Phase           string
+	AbilityCooldown int
+	SignalBias      string
 	// AvailableSkills is populated when the client requests upgrade UI
 	AvailableSkills []agent.Skill
 	Dungeon         agent.DungeonView
@@ -73,6 +77,10 @@ func (s Snapshot) SkillPointsValue() int               { return s.SkillPoints }
 func (s Snapshot) UnlockedSkillsValue() []string       { return s.UnlockedSkills }
 func (s Snapshot) AvailableSkillsValue() []agent.Skill { return s.AvailableSkills }
 func (s Snapshot) LastSignalIDValue() string           { return s.LastSignalID }
+func (s Snapshot) PathTypeValue() string               { return s.PathType }
+func (s Snapshot) PhaseValue() string                  { return s.Phase }
+func (s Snapshot) AbilityCooldownValue() int           { return s.AbilityCooldown }
+func (s Snapshot) SignalBiasValue() string             { return s.SignalBias }
 func (s Snapshot) RunSummaryValue() *agent.RunSummaryView {
 	return s.RunSummary
 }

@@ -9,6 +9,31 @@ import (
 
 type AnchorType string
 
+type PathType string
+
+const (
+	PathUnselected PathType = ""
+	PathStabilizer PathType = "STABILIZER"
+	PathHarvester  PathType = "HARVESTER"
+	PathAggressor  PathType = "AGGRESSOR"
+)
+
+type MutatorType string
+
+const (
+	MutatorCorruptionZone MutatorType = "CORRUPTION_ZONE"
+	MutatorStabilization  MutatorType = "STABILIZATION_FIELD"
+	MutatorFragileFloor   MutatorType = "FRAGILE_FLOOR"
+	MutatorEnemyNest      MutatorType = "ENEMY_NEST"
+)
+
+type MutatorTile struct {
+	Pos      core.Position
+	Type     MutatorType
+	Consumed bool
+	Steps    int
+}
+
 const (
 	AnchorMemoryVault  AnchorType = "MEMORY_VAULT"
 	AnchorRecoveryNode AnchorType = "RECOVERY_NODE"
@@ -66,6 +91,19 @@ type Instance struct {
 	PeakPressure int
 	TimeInSignal int
 	ResultType   string
+
+	// v0.3.12
+	PathType         PathType
+	PathPending      bool
+	SignalBias       string
+	RunPhase         string // I | II | III
+	CoreInteracted   bool
+	AbilityName      string
+	AbilityCooldown  int
+	SuppressTicks    int
+	EnemyStunTicks   int
+	MutatorTiles     []MutatorTile
+	NestSpawnedPhase bool
 }
 
 // EntityKind enumerates minimal enemy types.
@@ -131,6 +169,17 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		PeakPressure:       0,
 		TimeInSignal:       0,
 		ResultType:         "",
+		PathType:           PathUnselected,
+		PathPending:        true,
+		SignalBias:         "",
+		RunPhase:           "I",
+		CoreInteracted:     false,
+		AbilityName:        "",
+		AbilityCooldown:    0,
+		SuppressTicks:      0,
+		EnemyStunTicks:     0,
+		MutatorTiles:       []MutatorTile{},
+		NestSpawnedPhase:   false,
 	}
 
 	// compute deterministic risk nodes
@@ -149,6 +198,109 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 		inst.Entities = append(inst.Entities, e)
 	}
 	return inst
+}
+
+func hashID(id string) int {
+	sum := 0
+	for i := 0; i < len(id); i++ {
+		sum += int(id[i]) * (i + 1)
+	}
+	if sum < 0 {
+		return -sum
+	}
+	return sum
+}
+
+func (d *Instance) SetPath(path PathType) {
+	d.PathType = path
+	d.PathPending = false
+	switch path {
+	case PathStabilizer:
+		d.AbilityName = "SUPPRESS"
+	case PathHarvester:
+		d.AbilityName = "EXTRACT"
+	case PathAggressor:
+		d.AbilityName = "OVERDRIVE"
+	default:
+		d.AbilityName = ""
+	}
+}
+
+func (d *Instance) EnrageThreshold() int {
+	threshold := 15
+	matchBias := false
+	if d.SignalBias != "" && string(d.PathType) == d.SignalBias {
+		matchBias = true
+	}
+	switch d.PathType {
+	case PathStabilizer:
+		threshold += 2
+		if matchBias {
+			threshold += 1
+		}
+	case PathAggressor:
+		threshold -= 2
+		if matchBias {
+			threshold -= 1
+		}
+	}
+	if threshold < 1 {
+		threshold = 1
+	}
+	return threshold
+}
+
+func (d *Instance) SetSignalBias(signalID string) {
+	h := hashID(signalID)
+	switch h % 3 {
+	case 0:
+		d.SignalBias = string(PathStabilizer)
+	case 1:
+		d.SignalBias = string(PathHarvester)
+	default:
+		d.SignalBias = string(PathAggressor)
+	}
+}
+
+func (d *Instance) SeedMutators(signalID string) {
+	d.MutatorTiles = []MutatorTile{}
+	h := hashID(signalID)
+	count := 2 + (h % 3)
+	if d.SignalBias == string(PathHarvester) && count < 4 {
+		count++
+	}
+	if d.SignalBias == string(PathStabilizer) && count > 2 {
+		count--
+	}
+	innerW := d.Width - 2
+	innerH := d.Height - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+	if innerH < 1 {
+		innerH = 1
+	}
+	used := map[core.Position]bool{}
+	types := []MutatorType{MutatorCorruptionZone, MutatorStabilization, MutatorFragileFloor, MutatorEnemyNest}
+	for i := 0; i < count; i++ {
+		pos := core.Position{X: 1 + ((h + i*3) % innerW), Y: 1 + ((h + i*5) % innerH)}
+		if pos == d.Anchor || pos == d.Exit || pos == d.Entry || used[pos] {
+			pos.X = (pos.X % innerW) + 1
+			pos.Y = (pos.Y % innerH) + 1
+		}
+		used[pos] = true
+		t := types[(h+i)%len(types)]
+		d.MutatorTiles = append(d.MutatorTiles, MutatorTile{Pos: pos, Type: t})
+	}
+}
+
+func (d *Instance) MutatorAt(pos core.Position) (int, bool) {
+	for i := range d.MutatorTiles {
+		if d.MutatorTiles[i].Pos == pos {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // assignObjectiveType deterministically maps an instance ID to one of four objectives.
@@ -408,7 +560,7 @@ func (d *Instance) String() string {
 
 // Enraged reports whether this instance is in enraged (critical) state.
 func (d *Instance) Enraged() bool {
-	return d.Pressure >= 15
+	return d.Pressure >= d.EnrageThreshold()
 }
 
 // computeRiskNodes deterministically produces three distinct node positions
