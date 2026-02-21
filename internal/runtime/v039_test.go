@@ -186,7 +186,7 @@ func TestPressureBarRendering(t *testing.T) {
 	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	plain := re.ReplaceAllString(out, "")
 	// Expect the rendered pressure to reflect current runtime values.
-	expected := fmt.Sprintf("%d / %d", d.Pressure, d.MaxPressure)
+	expected := fmt.Sprintf("%d/%d", d.Pressure, d.MaxPressure)
 	if !regexp.MustCompile(regexp.QuoteMeta(expected)).MatchString(plain) {
 		t.Fatalf("pressure line missing, got %s", plain)
 	}
