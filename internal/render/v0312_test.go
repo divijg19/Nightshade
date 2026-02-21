@@ -1,6 +1,7 @@
 package render
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -31,24 +32,17 @@ func TestV0312_DungeonHierarchyOrder(t *testing.T) {
 			CoreIntegrity:   90,
 			Threat:          "MEDIUM",
 			InstabilityBand: 1,
-			PathType:        "STABILIZER",
-			Phase:           "II",
-			AbilityName:     "SUPPRESS",
-			AbilityCooldown: 3,
 			ExitChanneling:  true,
 			ExitChannelTick: 9,
 		},
 	}
 	plain := stripANSI11(RenderForTest(obs))
-	ixPath := strings.Index(plain, "PATH:")
-	ixPhase := strings.Index(plain, "PHASE:")
-	ixPressure := strings.Index(plain, "PRESSURE:")
-	ixAbility := strings.Index(plain, "ABILITY:")
+	ixHeader := strings.Index(plain, "DUNGEON  t=10")
+	ixState := strings.Index(plain, "◼ 6/20")
+	ixChannel := strings.Index(plain, "⏳")
+	ixGrid := strings.Index(plain, "#")
 	ixEvent := strings.Index(plain, "Event line")
-	ixGrid := strings.Index(plain, "◉")
-	ixChannel := strings.Index(plain, "EXIT CHANNEL:")
-	ixHUD := strings.Index(plain, "Energy 100/100")
-	if !(ixPath < ixPhase && ixPhase < ixPressure && ixPressure < ixAbility && ixAbility < ixEvent && ixEvent < ixGrid && ixGrid < ixChannel && ixChannel < ixHUD) {
+	if !(ixHeader >= 0 && ixState > ixHeader && ixChannel > ixState && ixGrid > ixChannel && ixEvent > ixGrid) {
 		t.Fatalf("unexpected dungeon hierarchy order")
 	}
 	if strings.Contains(plain, "\r\n\r\n") {
@@ -56,11 +50,12 @@ func TestV0312_DungeonHierarchyOrder(t *testing.T) {
 	}
 }
 
-func TestV0312_PhaseVisualEvolutionDeterministic(t *testing.T) {
-	base := agent.Observation{
+func TestV0312_OneEventPerFrameInvariant(t *testing.T) {
+	obs := agent.Observation{
 		Tick:     4,
 		Mode:     "dungeon",
 		Position: core.Position{X: 1, Y: 1},
+		Event:    "Top event\nLower event",
 		Dungeon: &agent.DungeonView{
 			Grid:            testGrid12(),
 			Pressure:        8,
@@ -68,46 +63,88 @@ func TestV0312_PhaseVisualEvolutionDeterministic(t *testing.T) {
 			CoreIntegrity:   85,
 			Threat:          "HIGH",
 			InstabilityBand: 2,
-			PathType:        "AGGRESSOR",
-			AbilityName:     "OVERDRIVE",
 		},
 	}
-	p1 := base
-	p1.Dungeon.Phase = "I"
-	o1 := RenderForTest(p1)
-	p2 := base
-	p2.Dungeon.Phase = "II"
-	o2 := RenderForTest(p2)
-	if strings.Contains(o1, ANSIYellowBright+"◉"+ANSIReset) {
-		t.Fatalf("phase I should not use phase II core highlight")
+	plain := stripANSI11(RenderForTest(obs))
+	if strings.Count(plain, "Top event") != 1 {
+		t.Fatalf("expected exactly one top event line")
 	}
-	if !strings.Contains(o2, ANSIYellowBright+"◉"+ANSIReset) {
-		t.Fatalf("phase II should brighten core glyph")
-	}
-	p3 := base
-	p3.Dungeon.Phase = "III"
-	o3 := RenderForTest(p3)
-	if !strings.Contains(o3, ANSIRedBright+"PRESSURE:") {
-		t.Fatalf("phase III should tint pressure red")
-	}
-	p3b := p3
-	p3b.Tick = p3.Tick + 1
-	o3b := RenderForTest(p3b)
-	if o3 == o3b {
-		t.Fatalf("phase III alternation should deterministically vary with tick")
+	if strings.Contains(plain, "Lower event") {
+		t.Fatalf("expected no duplicate/secondary narration")
 	}
 }
 
-func TestV0312_BoardBiasRendering(t *testing.T) {
+func TestV0312_StateLineOrderAndEnergyDelta(t *testing.T) {
+	obs := agent.Observation{
+		Tick:     6,
+		Mode:     "dungeon",
+		Position: core.Position{X: 1, Y: 1},
+		Dungeon: &agent.DungeonView{
+			Grid:            testGrid12(),
+			Pressure:        12,
+			MaxPressure:     20,
+			CoreIntegrity:   77,
+			Threat:          "HIGH",
+			InstabilityBand: 3,
+		},
+	}
+	var b strings.Builder
+	RenderTo(&b, obs, 14, 3, 0, "", "→ Move NORTH (-1)  Energy 14/100 (+2)")
+	plain := stripANSI11(b.String())
+	if !strings.Contains(plain, "◼ 12/20   ◆ 77   ▲ HIGH   ⚡ 14/100 (+2)") {
+		t.Fatalf("state line order or energy delta is incorrect")
+	}
+}
+
+func TestV0312_BoardCompressionAndHeader(t *testing.T) {
 	obs := agent.Observation{
 		Tick: 220,
 		Mode: "board",
-		Board: &agent.BoardView{Signals: []agent.SignalView{
-			{ID: "S000", Type: "FRACTURE", Decay: 6, Corruption: 3, SignalBias: "AGGRESSOR"},
+		Board: &agent.BoardView{Cursor: 0, Signals: []agent.SignalView{
+			{ID: "S000", Type: "FRACTURE", Anchor: "MEMORY_VAULT", Corruption: 12, Decay: 8},
+			{ID: "S001", Type: "NULL", Anchor: "RECOVERY_NODE", Corruption: 6, Decay: 6},
+			{ID: "S002", Type: "NULL", Anchor: "MEMORY_VAULT", Corruption: 0, Decay: 0, Burned: true},
 		}},
 	}
 	plain := stripANSI11(RenderForTest(obs))
-	if !strings.Contains(plain, "(Aggressor Bias)") {
-		t.Fatalf("expected signal bias telegraph in board line")
+	if !strings.Contains(plain, "== SIGNAL BOARD ==") {
+		t.Fatalf("missing canonical board header")
+	}
+	if !strings.Contains(plain, "> [1] ✖ VAULT") || !strings.Contains(plain, "  [2] ○ NODE") || !strings.Contains(plain, "  [3] ✓ VAULT") {
+		t.Fatalf("missing compressed board row mapping")
+	}
+	if strings.Contains(plain, "S:") {
+		t.Fatalf("decay should be hidden in board compression")
+	}
+}
+
+func TestV0312_EnemyLockVisualAndNoWrap80(t *testing.T) {
+	obs := agent.Observation{
+		Tick:     8,
+		Mode:     "dungeon",
+		Position: core.Position{X: 1, Y: 1},
+		Dungeon: &agent.DungeonView{
+			Grid:            testGrid12(),
+			Pressure:        5,
+			MaxPressure:     20,
+			CoreIntegrity:   88,
+			Threat:          "LOW",
+			InstabilityBand: 1,
+			Enemies:         []agent.EnemyView{{Kind: "SENTINEL", X: 2, Y: 2, TargetLocked: true}},
+		},
+	}
+	out := RenderForTest(obs)
+	if !strings.Contains(out, ANSIRedBright+"S"+ANSIReset) {
+		t.Fatalf("expected deterministic lock visual mapping for locked enemy")
+	}
+	plain := stripANSI11(out)
+	for _, line := range strings.Split(plain, "\n") {
+		if len([]rune(strings.TrimRight(line, "\r"))) > 80 {
+			t.Fatalf("line exceeds 80 columns")
+		}
+	}
+	re := regexp.MustCompile(`◼\s+5/20\s+([█░]{20})`)
+	if !re.MatchString(plain) {
+		t.Fatalf("pressure bar width invariant failed")
 	}
 }

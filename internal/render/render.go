@@ -32,6 +32,70 @@ const (
 
 func color(code string, s string) string { return esc + "[" + code + "m" + s + esc + "[0m" }
 
+func firstNonEmptyLine(s string) string {
+	for _, ln := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func parseEnergyDelta(status string) string {
+	line := firstNonEmptyLine(status)
+	if line == "" {
+		return ""
+	}
+	start := strings.LastIndex(line, "(")
+	end := strings.LastIndex(line, ")")
+	if start < 0 || end <= start {
+		return ""
+	}
+	inside := strings.TrimSpace(line[start+1 : end])
+	if inside == "+0" || inside == "-0" || inside == "0" {
+		return ""
+	}
+	if strings.HasPrefix(inside, "+") || strings.HasPrefix(inside, "-") {
+		return inside
+	}
+	return ""
+}
+
+func threatColored(level string) string {
+	up := strings.ToUpper(strings.TrimSpace(level))
+	switch up {
+	case "LOW":
+		return ANSIGrayDim + "LOW" + ANSIReset
+	case "MEDIUM":
+		return ANSIYellow + "MEDIUM" + ANSIReset
+	case "HIGH":
+		return ANSIYellowBright + "HIGH" + ANSIReset
+	case "EXTREME":
+		return ANSIRedBright + "EXTREME" + ANSIReset
+	default:
+		return ANSIGrayDim + "LOW" + ANSIReset
+	}
+}
+
+func oneEventLine(obsEvent string, status string) string {
+	ev := firstNonEmptyLine(obsEvent)
+	if ev != "" {
+		if strings.Contains(ev, "You are entering a signal fragment") || strings.Contains(ev, "You are inside a signal") {
+			return "You are stabilizing corrupted signals."
+		}
+		return ev
+	}
+	st := firstNonEmptyLine(status)
+	if st == "" {
+		return ""
+	}
+	if idx := strings.Index(st, "  Energy "); idx >= 0 {
+		st = strings.TrimSpace(st[:idx])
+	}
+	return st
+}
+
 // Options controls purely-presentational layout decisions.
 // It must not influence game state or determinism.
 type Options struct {
@@ -77,12 +141,6 @@ func RenderGrid(obs agent.Observation) []string {
 			}
 		}
 		lines := make([]string, 0, 8)
-		threat := "LOW"
-		if obs.Dungeon != nil && obs.Dungeon.Threat != "" {
-			threat = obs.Dungeon.Threat
-		}
-		lines = append(lines, fmt.Sprintf("WORLD Epoch %d  Threat %s", obs.Tick/100, threat))
-		lines = append(lines, "----------------------------------------")
 		maxCorruption := -1
 		for _, s := range obs.Board.Signals {
 			if s.Corruption > maxCorruption {
@@ -90,199 +148,108 @@ func RenderGrid(obs agent.Observation) []string {
 			}
 		}
 		for i, s := range obs.Board.Signals {
-			active := ""
+			lead := "  "
 			if i == obs.Board.Cursor {
-				active = " [ACTIVE]"
+				lead = "> "
 			}
-			corruption := s.Corruption
-			if corruption < 0 {
-				corruption = 0
+			icon := "○"
+			if strings.EqualFold(s.Type, "FRACTURE") {
+				icon = "✖"
 			}
-			if corruption > 5 {
-				corruption = 5
+			if s.Burned || s.Decay <= 0 {
+				icon = "✓"
 			}
-			bar := strings.Repeat("▓", corruption) + strings.Repeat("░", 5-corruption)
-			mark := ""
+			label := "NODE"
+			if strings.EqualFold(s.Anchor, "MEMORY_VAULT") {
+				label = "VAULT"
+			}
+			marks := ""
 			if s.Corruption == maxCorruption {
-				mark = " ★"
+				marks += " *"
 			}
 			if obs.LastSignalID != "" && s.ID == obs.LastSignalID {
-				mark += " ↺"
+				marks += " ↺"
 			}
-			bias := ""
-			if s.SignalBias != "" {
-				bias = fmt.Sprintf(" (%s Bias)", strings.Title(strings.ToLower(s.SignalBias)))
-			}
-			lines = append(lines, fmt.Sprintf("[%d] %s%s  S:%d  C:%s%s%s", i+1, s.Type, bias, s.Decay, bar, active, mark))
+			lines = append(lines, fmt.Sprintf("%s[%d] %s %-6s  ◆ %d%s", lead, i+1, icon, label, s.Corruption, marks))
 			if i >= 4 {
 				break
 			}
 		}
-		lines = append(lines, "----------------------------------------")
-		if strings.TrimSpace(obs.Event) == "" {
-			lines = append(lines, "Q Quick Dive  |  R Resume Last  |  Press 1–5 to enter")
-		}
+		lines = append(lines, "1–5 Enter   Q Quick Dive   R Resume")
 		return lines
 	}
 
 	if obs.Mode == "dungeon" {
-		lines := make([]string, 0, 14)
+		lines := make([]string, 0, 8)
 		if obs.Dungeon == nil {
 			return []string{"(dungeon)"}
 		}
 
-		path := obs.Dungeon.PathType
-		if path == "" {
-			path = "UNSELECTED"
-		}
-		phase := obs.Dungeon.Phase
-		phaseLabel := "I — APPROACH"
-		switch phase {
-		case "II":
-			phaseLabel = "II — STABILIZATION"
-		case "III":
-			phaseLabel = "III — ESCAPE"
-		}
-		lines = append(lines, fmt.Sprintf("PATH: %s", path))
-		lines = append(lines, fmt.Sprintf("PHASE: %s", phaseLabel))
-
-		segments := 20
-		filled := obs.Dungeon.Pressure
-		if filled < 0 {
-			filled = 0
-		}
-		if filled > segments {
-			filled = segments
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", segments-filled)
-		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged || obs.Dungeon.Phase == "III" {
-			bar = ANSIRedBright + bar + ANSIReset
-		}
-		threat := obs.Dungeon.Threat
-		if threat == "" {
-			threat = "LOW"
-		}
-		pressureText := fmt.Sprintf("PRESSURE: %s  %d / %d", bar, obs.Dungeon.Pressure, obs.Dungeon.MaxPressure)
-		if obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged || obs.Dungeon.Phase == "III" {
-			pressureText = ANSIRedBright + pressureText + ANSIReset
-		}
-		lines = append(lines, fmt.Sprintf("%s    CORE %d%%    THREAT %s", pressureText, obs.Dungeon.CoreIntegrity, threat))
-		lines = append(lines, fmt.Sprintf("ABILITY: %s  CD %d", obs.Dungeon.AbilityName, obs.Dungeon.AbilityCooldown))
-
-		if strings.TrimSpace(obs.Event) != "" {
-			if strings.Contains(obs.Event, "\n") {
-				for _, ln := range strings.Split(obs.Event, "\n") {
-					ln = strings.TrimSpace(ln)
-					if ln != "" {
-						lines = append(lines, ln)
-					}
-				}
-			} else {
-				lines = append(lines, strings.TrimSpace(obs.Event))
-			}
-		}
-
 		if len(obs.Dungeon.Grid) > 0 {
-			band := obs.Dungeon.InstabilityBand
 			mutatorMap := map[core.Position]agent.MutatorTileView{}
 			for _, mt := range obs.Dungeon.MutatorTiles {
 				mutatorMap[core.Position{X: mt.X, Y: mt.Y}] = mt
 			}
-			// build enemy lookup map for overlay
 			enemyMap := map[core.Position]agent.EnemyView{}
-			distractedAnchor := false
-			distractedExit := false
-			if obs.Dungeon != nil {
-				for _, ev := range obs.Dungeon.Enemies {
-					pos := core.Position{X: ev.X, Y: ev.Y}
-					enemyMap[pos] = ev
-					if ev.Target == "anchor" {
-						distractedAnchor = true
-					}
-					if ev.Target == "exit" {
-						distractedExit = true
-					}
-				}
+			for _, ev := range obs.Dungeon.Enemies {
+				pos := core.Position{X: ev.X, Y: ev.Y}
+				enemyMap[pos] = ev
 			}
 			for y, row := range obs.Dungeon.Grid {
 				var b strings.Builder
 				for x, ch := range row {
 					pos := core.Position{X: x, Y: y}
-					g := applyInstabilityGlyph(ch, band, x, y, obs.Tick)
-					g = unicodeGlyph(g)
+					g := unicodeGlyph(ch)
 					// center is player
 					if x == int(obs.Position.X) && y == int(obs.Position.Y) {
 						b.WriteString(ANSIWhiteBright + "@" + ANSIReset)
 						continue
 					}
-					if _, ok := enemyMap[pos]; ok {
-						// render archetype glyphs/colors
-						ev := enemyMap[pos]
+					if ev, ok := enemyMap[pos]; ok {
+						glyph := "H"
 						switch ev.Kind {
 						case "HUNTER":
-							b.WriteString(ANSIRedBright + "⚔" + ANSIReset)
+							glyph = "H"
 						case "SENTINEL":
-							b.WriteString(ANSIYellow + "☣" + ANSIReset)
+							glyph = "S"
 						case "WARDEN":
-							b.WriteString(ANSIRedBright + "✶" + ANSIReset)
-						case "SHADE":
-							b.WriteString(ANSIMagentaDim + "◌" + ANSIReset)
+							glyph = "W"
 						default:
-							b.WriteString(ANSIRedBright + "⚔" + ANSIReset)
+							glyph = "H"
+						}
+						if ev.TargetLocked {
+							b.WriteString(ANSIRedBright + glyph + ANSIReset)
+						} else {
+							b.WriteString(glyph)
 						}
 						continue
 					}
 					if mt, ok := mutatorMap[pos]; ok {
 						switch mt.Type {
 						case "CORRUPTION_ZONE":
-							b.WriteString(ANSIRedBright + "☠" + ANSIReset)
+							b.WriteString("x")
 						case "STABILIZATION_FIELD":
-							if mt.Consumed {
-								b.WriteString(ANSIGrayDim + "✚" + ANSIReset)
-							} else {
-								b.WriteString(ANSIYellowBright + "✚" + ANSIReset)
-							}
+							b.WriteString("+")
 						case "FRAGILE_FLOOR":
-							b.WriteString(ANSICyan + "⧈" + ANSIReset)
+							b.WriteString("o")
 						case "ENEMY_NEST":
-							b.WriteString(ANSIMagentaDim + "✸" + ANSIReset)
+							b.WriteString("n")
 						default:
 							b.WriteRune(g)
 						}
 						continue
 					}
-					// v0.3.5: subtle cue when an enemy is distracted toward anchor/exit.
-					if distractedAnchor && g == 'A' {
-						b.WriteString(ANSIMagentaDim + "A" + ANSIReset)
+					if obs.Dungeon.Phase == "II" && g == 'A' {
+						b.WriteString(ANSIYellowBright + "◉" + ANSIReset)
 						continue
 					}
-					if distractedExit && g == 'X' {
-						b.WriteString(ANSIMagentaDim + "X" + ANSIReset)
+					if obs.Dungeon.Phase == "III" && g == '#' {
+						b.WriteString(ANSIGrayDim + "#" + ANSIReset)
 						continue
 					}
-					if g == 'X' && (obs.Dungeon.InstabilityBand >= 3 || obs.Dungeon.Enraged) {
-						b.WriteString(ANSIRedBright + "X" + ANSIReset)
+					if obs.Dungeon.Phase == "III" && g == '·' && (obs.Tick%2 == 0) {
+						b.WriteString(ANSIYellowDim + "·" + ANSIReset)
 						continue
-					}
-					if obs.Dungeon.Phase == "II" {
-						if g == '◉' {
-							b.WriteString(ANSIYellowBright + string(g) + ANSIReset)
-							continue
-						}
-						if g == '·' {
-							b.WriteString(ANSICyan + string(g) + ANSIReset)
-							continue
-						}
-					}
-					if obs.Dungeon.Phase == "III" {
-						if g == '▓' {
-							b.WriteString(ANSIGrayDim + string(g) + ANSIReset)
-							continue
-						}
-						if (x+y+obs.Tick)%2 == 0 && g == '·' {
-							b.WriteString(ANSIYellowDim + string(g) + ANSIReset)
-							continue
-						}
 					}
 					b.WriteRune(g)
 				}
@@ -290,20 +257,6 @@ func RenderGrid(obs agent.Observation) []string {
 			}
 		} else {
 			lines = append(lines, "(no grid)")
-		}
-		if obs.Dungeon.ExitChanneling {
-			fill := obs.Tick - obs.Dungeon.ExitChannelTick + 1
-			if fill < 0 {
-				fill = 0
-			}
-			if fill > 5 {
-				fill = 5
-			}
-			channel := fmt.Sprintf("EXIT CHANNEL: %s%s", strings.Repeat("█", fill), strings.Repeat("░", 5-fill))
-			if obs.Dungeon.InstabilityBand >= 3 {
-				channel = ANSIRedBright + channel + ANSIReset
-			}
-			lines = append(lines, channel)
 		}
 		return lines
 	}
@@ -396,16 +349,16 @@ func splitStatusLines(s string) []string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
-	// Keep status to at most 2 lines; avoid raw \n in output.
+	// Keep status compact; avoid raw \n in output.
 	parts := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-	lines := make([]string, 0, 2)
+	lines := make([]string, 0, 3)
 	for _, p := range parts {
 		p = strings.TrimRight(p, "\r\n")
 		if p == "" {
 			continue
 		}
 		lines = append(lines, p)
-		if len(lines) == 2 {
+		if len(lines) == 3 {
 			break
 		}
 	}
@@ -430,14 +383,67 @@ func maxVisibleWidth(ansiRE *regexp.Regexp, lines []string) int {
 func BuildFrameWithOptions(obs agent.Observation, status string, energy int, paranoia int, scars int, opts Options) Frame {
 	grid := RenderGrid(obs)
 	narration := []string{}
-	if obs.Mode != "dungeon" && strings.TrimSpace(obs.Event) != "" {
-		narration = append(narration, strings.TrimSpace(obs.Event))
+	eventLine := oneEventLine(obs.Event, status)
+	if eventLine != "" {
+		narration = append(narration, eventLine)
 	}
 
 	// HUD
 	hud := make([]string, 0, 2)
 	if obs.Mode == "dungeon" {
-		hud = append(hud, fmt.Sprintf("Energy %d/100    Fragments %d    Skill Points %d", energy, obs.Fragments, obs.SkillPoints))
+		segments := 20
+		filled := 0
+		maxPressure := 20
+		core := 100
+		threat := "LOW"
+		enraged := false
+		phase := ""
+		if obs.Dungeon != nil {
+			filled = obs.Dungeon.Pressure
+			maxPressure = obs.Dungeon.MaxPressure
+			core = obs.Dungeon.CoreIntegrity
+			threat = obs.Dungeon.Threat
+			enraged = obs.Dungeon.Enraged
+			phase = obs.Dungeon.Phase
+		}
+		if filled < 0 {
+			filled = 0
+		}
+		if filled > segments {
+			filled = segments
+		}
+		delta := parseEnergyDelta(status)
+		energyPart := fmt.Sprintf("⚡ %d/100", energy)
+		if delta != "" {
+			energyPart += " (" + delta + ")"
+		}
+		state := fmt.Sprintf("◼ %d/%d   ◆ %d   ▲ %s   %s", filled, maxPressure, core, threatColored(threat), energyPart)
+		statusLines := []string{state}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", segments-filled)
+		if obs.Dungeon != nil && (obs.Dungeon.InstabilityBand >= 3 || strings.EqualFold(threat, "EXTREME")) {
+			bar = ANSIRedBright + bar + ANSIReset
+		}
+		if enraged && (obs.Tick%2 == 0) {
+			bar = ANSIRedBright + bar + ANSIReset
+		}
+		statusLines = append(statusLines, fmt.Sprintf("◼ %d/%d  %s", filled, maxPressure, bar))
+		if obs.Dungeon != nil && obs.Dungeon.ExitChanneling {
+			fill := obs.Tick - obs.Dungeon.ExitChannelTick + 1
+			if fill < 0 {
+				fill = 0
+			}
+			if fill > 5 {
+				fill = 5
+			}
+			statusLines = append(statusLines, fmt.Sprintf("⏳ %s%s", strings.Repeat("█", fill), strings.Repeat("░", 5-fill)))
+		}
+		_ = phase
+		status = strings.Join(statusLines, "\n")
+		hud = nil
+		narration = []string{}
+		if eventLine != "" {
+			narration = append(narration, eventLine)
+		}
 	} else {
 		hudLabel := color("2;36", "Energy")
 		energyStr := fmt.Sprintf(" %d/%d", energy, 100)
@@ -457,16 +463,29 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 
 	header := "WORLD  " + ANSIGrayDim + fmt.Sprintf("tick %d", obs.Tick) + ANSIReset
 	if obs.Mode == "dungeon" {
-		band := 0
+		band := "STABLE"
+		mut := ""
 		if obs.Dungeon != nil {
-			band = obs.Dungeon.InstabilityBand
+			switch obs.Dungeon.InstabilityBand {
+			case 1:
+				band = "UNSTABLE"
+			case 2:
+				band = "DANGEROUS"
+			case 3:
+				band = "CRITICAL"
+			}
+			if len(obs.Dungeon.MutatorTiles) > 0 {
+				mut = "  ✦ MUTATOR"
+			}
 		}
-		_, colored := instabilityLabel(band)
 		enrage := ""
 		if obs.Dungeon != nil && obs.Dungeon.Enraged {
-			enrage = " ENRAGE"
+			enrage = "  ‼"
 		}
-		header = fmt.Sprintf("DUNGEON tick %d [%s%s]", obs.Tick, colored, enrage)
+		header = fmt.Sprintf("DUNGEON  t=%d  %s%s%s", obs.Tick, band, enrage, mut)
+	}
+	if obs.Mode == "board" {
+		header = "== SIGNAL BOARD =="
 	}
 	if obs.Mode == "board" && obs.RunSummary != nil {
 		header = "SIGNAL REPORT"
@@ -484,71 +503,18 @@ func BuildFrameWithOptions(obs agent.Observation, status string, energy int, par
 	}
 }
 
-func instabilityLabel(band int) (plain string, colored string) {
-	switch band {
-	case 0:
-		plain = "STABLE"
-		return plain, plain
-	case 1:
-		plain = "UNSTABLE"
-		return plain, ANSIYellowDim + plain + ANSIReset
-	case 2:
-		plain = "DANGEROUS"
-		return plain, ANSIYellowBright + plain + ANSIReset
-	default:
-		plain = "CRITICAL"
-		return plain, ANSIRedBright + plain + ANSIReset
-	}
-}
-
-func applyInstabilityGlyph(ch rune, band int, x int, y int, tick int) rune {
-	// Never alter special markers.
-	if ch == 'E' || ch == 'A' || ch == 'X' {
-		return ch
-	}
-
-	out := ch
-
-	// Band >=1: some floors wobble '.' -> '~'
-	if band >= 1 && out == '.' {
-		if (x+y+tick)%4 == 0 {
-			out = '~'
-		}
-	}
-
-	// Band >=2: some walls flicker '#' <-> '%'
-	if band >= 2 && out == '#' {
-		if (x+y+tick)%3 == 0 {
-			out = '%'
-		}
-	}
-
-	// Band >=3: unknown tiles appear more frequently (visual only)
-	if band >= 3 {
-		if out == '.' || out == '~' {
-			if (x+y+tick)%4 == 1 {
-				out = '?'
-			}
-		}
-	}
-
-	return out
-}
-
 func unicodeGlyph(ch rune) rune {
 	switch ch {
 	case '#', '%':
-		return '▓'
-	case '.':
-		return '·'
-	case '~':
+		return '#'
+	case '.', '~':
 		return '·'
 	case 'A':
-		return '◉'
+		return 'A'
 	case 'X':
 		return '◇'
 	case 'E':
-		return '▲'
+		return 'E'
 	default:
 		return ch
 	}
@@ -604,6 +570,40 @@ func RenderFrame(w io.Writer, f Frame) {
 	}
 	sep := strings.Repeat("-", frameW)
 	isDungeonFrame := strings.HasPrefix(header, "DUNGEON")
+	if frameW > 80 {
+		frameW = 80
+		sep = strings.Repeat("-", frameW)
+	}
+
+	if isDungeonFrame {
+		writeLine(&sb, header)
+		writeLine(&sb, sep)
+		for i, s := range f.Status {
+			if i >= 3 {
+				break
+			}
+			line := s
+			if visibleWidth(ansiRE, line) > 80 {
+				runes := []rune(ansiRE.ReplaceAllString(line, ""))
+				if len(runes) > 80 {
+					line = string(runes[:80])
+				}
+			}
+			writeLine(&sb, line)
+		}
+		writeLine(&sb, sep)
+		for _, line := range f.Grid {
+			writeLine(&sb, line)
+		}
+		writeLine(&sb, sep)
+		if len(f.Narration) > 0 {
+			writeLine(&sb, f.Narration[0])
+		}
+		sb.WriteString(cursorShow)
+		sb.WriteString(f.Prompt)
+		_, _ = io.WriteString(w, sb.String())
+		return
+	}
 
 	// Header + single separator
 	writeLine(&sb, header)
