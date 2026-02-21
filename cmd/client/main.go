@@ -40,8 +40,15 @@ func defaultSocket() string {
 func main() {
 	socketFlag := flag.String("socket", defaultSocket(), "unix socket path (or set NIGHTSHADE_SOCKET)")
 	minimalFlag := flag.Bool("minimal", false, "use minimal UI framing")
+	cliFlag := flag.Bool("cli", false, "use legacy CLI renderer")
 	flag.Parse()
 	socket := *socketFlag
+	if !*cliFlag {
+		if err := runTUI(socket); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+		}
+		return
+	}
 
 	// Terminal raw mode to suppress kernel echo and allow controlled prompt
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
