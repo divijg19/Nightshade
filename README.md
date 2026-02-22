@@ -58,6 +58,7 @@ nightshade/
 │   └── nightshade/
 │       └── main.go
 ├── internal/
+│   ├── app/        # canonical app entry boundaries (client/server/single/transport)
 │   ├── runtime/    # tick loop, clock, snapshots
 │   ├── world/      # pure world state
 │   ├── game/       # rules & mechanics
@@ -184,25 +185,63 @@ Generated policies can then be loaded by the Go runtime.
 
 ### Quickstart (Human Player)
 
-Run the server (authoritative runtime):
+Canonical entry (single-process runtime + TUI):
+
+```bash
+go run ./cmd/nightshade
+```
+
+This is the primary way to play.
+
+### Multiplayer Mode
+
+Run the authoritative server:
 
 ```bash
 go run ./cmd/server
 ```
 
-In a second terminal, run the client (terminal UI):
+In a second terminal, run the network client (terminal UI):
 
 ```bash
 go run ./cmd/client
 ```
 
-The client runs as a **full-screen TUI** (alternate screen mode) by default.
+Equivalent canonical subcommands:
+
+```bash
+go run ./cmd/nightshade -- server
+go run ./cmd/nightshade -- client
+```
+
+Installed binary equivalents:
+
+```bash
+nightshade server
+nightshade client
+```
+
+The client always runs as a **full-screen TUI** (alternate screen mode).
 
 If you need a custom socket path:
 
 ```bash
 NIGHTSHADE_SOCKET=/path/to/socket go run ./cmd/server
 go run ./cmd/client --socket /path/to/socket
+```
+
+Or with canonical subcommands:
+
+```bash
+NIGHTSHADE_SOCKET=/path/to/socket go run ./cmd/nightshade -- server
+go run ./cmd/nightshade -- client --socket /path/to/socket
+```
+
+TCP multiplayer transport (`--addr`):
+
+```bash
+go run ./cmd/nightshade -- server --addr :4000
+go run ./cmd/nightshade -- client --addr :4000
 ```
 
 ### Controls
