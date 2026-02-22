@@ -8,20 +8,26 @@ import (
 	"github.com/divijg19/Nightshade/internal/agent"
 )
 
-type snapshotMsg struct {
-	obs    agent.Observation
-	energy int
+type NetworkClient interface {
+	SendInput(key string) error
+	Disconnect() error
+}
+
+type SnapshotMsg struct {
+	Obs    agent.Observation
+	Energy int
 }
 
 type connectionClosedMsg struct{}
 
 type Model struct {
 	incoming <-chan tea.Msg
-	send     func(string) error
+	network  NetworkClient
 
-	obs      agent.Observation
-	energy   int
-	hasObs   bool
+	obs    agent.Observation
+	energy int
+	hasObs bool
+
 	status   string
 	showHelp bool
 
@@ -35,14 +41,14 @@ type Model struct {
 	pendingBaseX int
 	pendingBaseY int
 
-	disconnected bool
 	quitRequested bool
-	width int
-	height int
+	disconnected  bool
+	width         int
+	height        int
 }
 
-func NewModel(incoming <-chan tea.Msg, send func(string) error) Model {
-	return Model{incoming: incoming, send: send, history: make([]agent.Observation, 0, 32)}
+func NewModel(incoming <-chan tea.Msg, network NetworkClient) Model {
+	return Model{incoming: incoming, network: network, history: make([]agent.Observation, 0, 32)}
 }
 
 func waitIncoming(ch <-chan tea.Msg) tea.Cmd {
@@ -59,11 +65,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return handleKey(m, msg)
-	case snapshotMsg:
-		m.obs = msg.obs
-		m.energy = msg.energy
+	case SnapshotMsg:
+		m.obs = msg.Obs
+		m.energy = msg.Energy
 		m.hasObs = true
-		m.history = append(m.history, msg.obs)
+		m.history = append(m.history, msg.Obs)
 		if len(m.history) > 32 {
 			m.history = m.history[len(m.history)-32:]
 		}
@@ -109,10 +115,9 @@ func (m Model) View() string {
 }
 
 func (m Model) WantsQuit() bool { return m.quitRequested }
-func (m Model) WantsReconnect() bool { return m.disconnected && !m.quitRequested }
 
 func helpStatus() string {
-	return "Controls: w/a/s/d move  e observe  f ability  . wait\nMore: i introspect  [ ] replay  Ctrl-C quit  ? help"
+	return "Controls: w/a/s/d move e observe . wait f ability 1/2/3 path q dive r resume [/] replay i inspect Ctrl-C quit ? help"
 }
 
 func buildIntrospectionLine(obs agent.Observation) string {
@@ -135,7 +140,7 @@ func buildIntrospectionLine(obs agent.Observation) string {
 			hasScars = true
 		}
 	}
-	return fmt.Sprintf("Beliefs: %d  Certain:%d Recent:%d Fading:%d Doubtful:%d Scars:%t", total, certain, recent, fading, doubtful, hasScars)
+	return fmt.Sprintf("Beliefs: %d Certain:%d Recent:%d Fading:%d Doubtful:%d Scars:%t", total, certain, recent, fading, doubtful, hasScars)
 }
 
 func quickDiveSignalID(signals []agent.SignalView) (string, bool) {
@@ -176,10 +181,8 @@ func asInputKey(msg tea.KeyMsg) string {
 		return "CTRL_C"
 	}
 	s := strings.TrimSpace(msg.String())
-	if len(s) == 1 {
-		if s[0] >= 'A' && s[0] <= 'Z' {
-			s = strings.ToLower(s)
-		}
+	if len(s) == 1 && s[0] >= 'A' && s[0] <= 'Z' {
+		s = strings.ToLower(s)
 	}
 	return s
 }

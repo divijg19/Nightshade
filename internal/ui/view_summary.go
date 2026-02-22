@@ -1,14 +1,19 @@
 package ui
 
-import "github.com/divijg19/Nightshade/internal/render"
+import "fmt"
 
 func renderSummary(m Model) string {
-	frame := render.BuildFrameWithOptions(m.obs, m.status, m.energy, 3, 0, render.Options{})
-	lines := make([]string, 0, 1+len(frame.Grid)+1)
-	lines = append(lines, frame.Header)
-	lines = append(lines, frame.Grid...)
-	if len(frame.Narration) > 0 {
-		lines = append(lines, frame.Narration[0])
+	viewport := []string{"RUN SUMMARY", ""}
+	if m.obs.RunSummary != nil {
+		rs := m.obs.RunSummary
+		viewport = append(viewport, fmt.Sprintf("Result: %s", emptyDefault(rs.ResultType, "unknown")))
+		viewport = append(viewport, fmt.Sprintf("Peak Pressure: %d/%d", rs.PeakPressure, rs.MaxPressure))
+		viewport = append(viewport, fmt.Sprintf("Fragments: +%d", rs.FragmentsGained))
+		viewport = append(viewport, fmt.Sprintf("Skill XP: +%d", rs.SkillXP))
+		viewport = append(viewport, fmt.Sprintf("Time in Signal: %d", rs.TimeInSignal))
+		viewport = append(viewport, fmt.Sprintf("Threat: %s", emptyDefault(rs.ThreatLevel, "-")))
+	} else {
+		viewport = append(viewport, "No run summary available.")
 	}
-	return joinLines(lines)
+	return layout5Zones(m, viewport, "STABLE")
 }

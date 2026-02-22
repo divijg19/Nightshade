@@ -39,7 +39,7 @@ Human Terminal
       └─→ Snapshot ────┘
               │
               ▼
-          ASCII Renderer
+      Bubble Tea TUI Client
 ```
 
 * The **Go runtime** is a single monolith and the only source of truth.
@@ -53,6 +53,8 @@ Human Terminal
 ```
 nightshade/
 ├── cmd/
+│   ├── client/
+│   ├── server/
 │   └── nightshade/
 │       └── main.go
 ├── internal/
@@ -61,7 +63,8 @@ nightshade/
 │   ├── game/       # rules & mechanics
 │   ├── agent/      # humans + bots + learned agents
 │   ├── net/        # networking (thin)
-│   ├── render/     # ASCII rendering
+│   ├── ui/         # Bubble Tea full-screen TUI
+│   ├── render/     # debug/headless/test rendering helpers
 │   ├── event/      # event bus & logging
 │   ├── replay/     # determinism & replay
 │   └── util/       # minimal helpers
@@ -193,11 +196,7 @@ In a second terminal, run the client (terminal UI):
 go run ./cmd/client
 ```
 
-Optional: minimal UI framing
-
-```bash
-go run ./cmd/client --minimal
-```
+The client runs as a **full-screen TUI** (alternate screen mode) by default.
 
 If you need a custom socket path:
 
@@ -212,11 +211,16 @@ These are single-key inputs (no Enter required):
 
 * `w/a/s/d` – move
 * `e` – observe
+* `f` – ability
 * `.` (or Enter) – wait
+* `1/2/3` – path actions
+* `q` – quick dive (board mode)
+* `r` – resume last signal (board mode)
+* `1..9` – enter signal index (board mode)
 * `i` – introspect (UI-only)
 * `[` `]` – replay (UI-only)
 * `?` – help
-* `q` – quit
+* `Ctrl-C` – quit
 
 ### What This Feels Like (No Spoilers)
 
@@ -238,19 +242,16 @@ Nightshade is a deterministic, terminal-native shared world. You move, pause, an
 
 ## Explicit Non-Goals
 
-`Nightshade` intentionally does **not** include:
-
 * LLMs
 * cloud infrastructure
 * microservices
 * online ML inference
-* heavy ML models
 
 The focus is **clarity, correctness, and completeness**.
 
 ---
 
-## Future Extensions (Out of Scope)
+## Future Extensions (v0.4.x+)
 
 * Replay visualizer
 * Agent behavior analysis
