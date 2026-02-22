@@ -17,15 +17,17 @@ type App struct {
 	program  *tea.Program
 }
 
-func New(send func(string) error) *App {
+var newProgram = tea.NewProgram
+
+func New(network NetworkClient) *App {
 	incoming := make(chan tea.Msg, 64)
-	m := NewModel(incoming, send)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	m := NewModel(incoming, network)
+	p := newProgram(m, tea.WithAltScreen())
 	return &App{incoming: incoming, program: p}
 }
 
 func (a *App) SendSnapshot(obs agent.Observation, energy int) {
-	a.incoming <- snapshotMsg{obs: obs, energy: energy}
+	a.incoming <- SnapshotMsg{Obs: obs, Energy: energy}
 }
 
 func (a *App) NotifyConnectionClosed() {

@@ -206,13 +206,18 @@ func handleConn(conn net.Conn, agents map[string]*agent.RemoteHuman, cancels map
 			cancel()
 			return
 		}
-		if im.Type == "input" {
+		switch im.Type {
+		case "input":
 			// forward key to agent channel (non-blocking)
 			select {
 			case rh.RecvInput <- im.Key:
 			default:
 			}
-		} else {
+		case "disconnect":
+			log.Printf("client_disconnected agent=%s reason=client_quit", agentID)
+			cancel()
+			return
+		default:
 			// unknown frame type -> log and ignore
 			log.Printf("invalid_frame agent=%s err=unknown_type", agentID)
 		}

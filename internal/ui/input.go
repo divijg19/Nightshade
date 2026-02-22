@@ -9,6 +9,9 @@ import (
 func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := asInputKey(msg)
 	if key == "CTRL_C" {
+		if m.network != nil {
+			_ = m.network.Disconnect()
+		}
 		m.quitRequested = true
 		return m, tea.Quit
 	}
@@ -59,7 +62,9 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.lastSignalID = sid
 			m.pendingDesc = "Quick Dive"
-			_ = m.send("ENTER_SIGNAL " + sid)
+			if m.network != nil {
+				_ = m.network.SendInput("ENTER_SIGNAL " + sid)
+			}
 			return m, nil
 		case "r":
 			if !canResumeSignal(m.obs.Board.Signals, m.lastSignalID) {
@@ -71,7 +76,9 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.pendingDesc = "Resume Last"
-			_ = m.send("ENTER_SIGNAL " + m.lastSignalID)
+			if m.network != nil {
+				_ = m.network.SendInput("ENTER_SIGNAL " + m.lastSignalID)
+			}
 			return m, nil
 		}
 		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
@@ -80,7 +87,9 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				sid := m.obs.Board.Signals[idx].ID
 				m.lastSignalID = sid
 				m.pendingDesc = "enter signal " + sid
-				_ = m.send("ENTER_SIGNAL " + sid)
+				if m.network != nil {
+					_ = m.network.SendInput("ENTER_SIGNAL " + sid)
+				}
 				return m, nil
 			}
 		}
@@ -95,7 +104,9 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		desc := map[string]string{"w": "Move NORTH (-1)", "a": "Move WEST (-1)", "s": "Move SOUTH (-1)", "d": "Move EAST (-1)", "e": "Observe (-1)", ".": "Wait (+1)", "f": "Ability (F)", "1": "Path: Stabilizer", "2": "Path: Harvester", "3": "Path: Aggressor"}[key]
 		m.pendingDesc = desc
-		_ = m.send(key)
+		if m.network != nil {
+			_ = m.network.SendInput(key)
+		}
 		return m, nil
 	default:
 		m.status = fmt.Sprintf("Unknown key: %q  (? for help)", key)

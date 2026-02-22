@@ -12,6 +12,43 @@ import (
 	"github.com/divijg19/Nightshade/internal/ui"
 )
 
+type helloMsg struct {
+	Type      string `json:"type"`
+	PublicKey string `json:"public_key"`
+}
+
+type inputMsg struct {
+	Type string `json:"type"`
+	Key  string `json:"key"`
+}
+
+type disconnectMsg struct {
+	Type string `json:"type"`
+}
+
+type netClient struct {
+	conn net.Conn
+	mu   chan struct{}
+}
+
+func newNetClient(conn net.Conn) *netClient {
+	mu := make(chan struct{}, 1)
+	mu <- struct{}{}
+	return &netClient{conn: conn, mu: mu}
+}
+
+func (n *netClient) SendInput(key string) error {
+	<-n.mu
+	defer func() { n.mu <- struct{}{} }()
+	return nnet.WriteFrame(n.conn, inputMsg{Type: "input", Key: key})
+}
+
+func (n *netClient) Disconnect() error {
+	<-n.mu
+	defer func() { n.mu <- struct{}{} }()
+	return nnet.WriteFrame(n.conn, disconnectMsg{Type: "disconnect"})
+}
+
 func runTUI(socket string) error {
 	_, _, pubB64, err := persist.EnsureIdentity()
 	if err != nil {
@@ -41,13 +78,8 @@ func runTUI(socket string) error {
 			continue
 		}
 
-		sendMu := make(chan struct{}, 1)
-		sendMu <- struct{}{}
-		app := ui.New(func(key string) error {
-			<-sendMu
-			defer func() { sendMu <- struct{}{} }()
-			return nnet.WriteFrame(conn, inputMsg{Type: "input", Key: key})
-		})
+		client := newNetClient(conn)
+		app := ui.New(client)
 
 		go func() {
 			firstFrame := true

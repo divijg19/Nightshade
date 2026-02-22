@@ -1,8 +1,6 @@
 module github.com/divijg19/Nightshade
 
-go 1.25.6
-
-require golang.org/x/term v0.40.0
+go 1.25.7
 
 require github.com/charmbracelet/bubbletea v1.3.10
 
