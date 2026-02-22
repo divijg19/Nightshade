@@ -7,6 +7,11 @@ import (
 	"github.com/divijg19/Nightshade/internal/agent"
 )
 
+const (
+	minUIWidth  = 52
+	minUIHeight = 7
+)
+
 func joinLines(lines []string) string {
 	if len(lines) == 0 {
 		return ""
@@ -50,6 +55,24 @@ func centerLine(line string, width int) string {
 	return strings.Repeat(" ", pad) + line + strings.Repeat(" ", width-len(r)-pad)
 }
 
+func strongThreat(threat string, instability string) string {
+	t := strings.ToUpper(strings.TrimSpace(threat))
+	i := strings.ToUpper(strings.TrimSpace(instability))
+	if t == "" {
+		t = "-"
+	}
+	if t == "CRITICAL" || i == "CRITICAL" {
+		return "\x1b[1;31mCRITICAL\x1b[0m"
+	}
+	if t == "HIGH" || i == "DANGEROUS" {
+		return "\x1b[31mHIGH\x1b[0m"
+	}
+	if t == "MEDIUM" || i == "UNSTABLE" {
+		return "\x1b[33mMEDIUM\x1b[0m"
+	}
+	return "\x1b[2mLOW\x1b[0m"
+}
+
 func pressureBar(pressure, maxPressure int, width int) string {
 	if width <= 0 {
 		width = 12
@@ -63,6 +86,17 @@ func pressureBar(pressure, maxPressure int, width int) string {
 	return "[" + strings.Repeat("#", fill) + strings.Repeat("-", width-fill) + "]"
 }
 
+func channelBar(active bool, tick int, width int) string {
+	if width <= 0 {
+		width = 6
+	}
+	fill := 0
+	if active {
+		fill = clamp(tick, 1, width)
+	}
+	return "[" + strings.Repeat("=", fill) + strings.Repeat("-", width-fill) + "]"
+}
+
 func prioritizedEvent(m Model) string {
 	if strings.TrimSpace(m.obs.Event) != "" {
 		return m.obs.Event
@@ -73,7 +107,7 @@ func prioritizedEvent(m Model) string {
 	if strings.TrimSpace(m.status) != "" {
 		return m.status
 	}
-	return ""
+	return "\x1b[2m…\x1b[0m"
 }
 
 func selectedSignalID(obsMode string, boardSignals int, boardCursor int, signalID string) string {
@@ -93,35 +127,43 @@ func layout5Zones(m Model, viewport []string, instability string) string {
 		width = 80
 	}
 	height := m.height
+	if height <= 0 {
+		height = 24
+	}
+
+	if width < minUIWidth || height < minUIHeight {
+		msg := fmt.Sprintf("TERMINAL TOO SMALL (%dx%d) — resize to at least %dx%d", width, height, minUIWidth, minUIHeight)
+		out := make([]string, 0, height)
+		out = append(out, fitLine("NIGHTSHADE", width))
+		for len(out) < height-1 {
+			if len(out) == (height / 2) {
+				out = append(out, fitLine(msg, width))
+			} else {
+				out = append(out, strings.Repeat(" ", width))
+			}
+		}
+		out = append(out, fitLine("Widen terminal for full 5-zone TUI", width))
+		return joinLines(out)
+	}
 
 	signalID := selectedSignalID(m.obs.Mode, lenSignalList(m.obs), cursorValue(m.obs), m.lastSignalID)
-	header := fmt.Sprintf("MODE:%s  SIGNAL:%s  INSTABILITY:%s", strings.ToUpper(emptyDefault(m.obs.Mode, "board")), signalID, emptyDefault(instability, "-"))
+	header := fmt.Sprintf("MODE:%-7s  SIGNAL:%-6s  INSTABILITY:%-9s  ENERGY:%3d", strings.ToUpper(emptyDefault(m.obs.Mode, "board")), signalID, strings.ToUpper(emptyDefault(instability, "-")), m.energy)
 
 	pressure, maxPressure := 0, 0
 	coreIntegrity := 0
 	threat := "-"
+	exitBar := channelBar(false, 0, 6)
 	if m.obs.Dungeon != nil {
 		pressure = m.obs.Dungeon.Pressure
 		maxPressure = m.obs.Dungeon.MaxPressure
 		coreIntegrity = m.obs.Dungeon.CoreIntegrity
 		threat = emptyDefault(m.obs.Dungeon.Threat, "-")
+		exitBar = channelBar(m.obs.Dungeon.ExitChanneling, m.obs.Dungeon.ExitChannelTick, 6)
 	}
-	state := fmt.Sprintf("P:%s %d/%d  CORE:%d%%  THREAT:%s", pressureBar(pressure, maxPressure, 12), pressure, maxPressure, coreIntegrity, strings.ToUpper(threat))
+	state := fmt.Sprintf("PRESSURE:%s %2d/%-2d  CORE:%3d%%  THREAT:%s  EXIT:%s", pressureBar(pressure, maxPressure, 12), pressure, maxPressure, coreIntegrity, strongThreat(threat, instability), exitBar)
 
 	event := prioritizedEvent(m)
-	footer := "w/a/s/d move  e observe  . wait  f ability  1/2/3 path  q dive  r resume  [ ] replay  i inspect  ? help  Ctrl-C quit"
-
-	if height <= 0 {
-		lines := make([]string, 0, 4+len(viewport)+1)
-		lines = append(lines, fitLine(header, width))
-		lines = append(lines, fitLine(state, width))
-		for _, row := range viewport {
-			lines = append(lines, fitLine(centerLine(row, width), width))
-		}
-		lines = append(lines, fitLine(event, width))
-		lines = append(lines, fitLine(footer, width))
-		return joinLines(lines)
-	}
+	footer := "WASD Move  E Observe  . Wait  F Ability  1/2/3 Path  Q Dive  R Resume  [ ] Replay  I Inspect  ? Help  Ctrl-C Quit"
 
 	viewportRows := height - 4
 	if viewportRows < 1 {
@@ -169,7 +211,31 @@ func renderDungeon(m Model) string {
 		if len(m.obs.Dungeon.Grid) > 0 {
 			viewport = make([]string, 0, len(m.obs.Dungeon.Grid))
 			for _, row := range m.obs.Dungeon.Grid {
-				viewport = append(viewport, string(row))
+				cells := make([]string, 0, len(row))
+				for _, cell := range row {
+					switch cell {
+					case '.':
+						cells = append(cells, ". ")
+					case '#':
+						cells = append(cells, "##")
+					case '@':
+						cells = append(cells, "@@")
+					case 'C', 'c':
+						cells = append(cells, "CC")
+					case 'E', 'e':
+						cells = append(cells, "EE")
+					case 'A', 'a':
+						cells = append(cells, "AA")
+					case '~':
+						cells = append(cells, "~~")
+					case 'm', 'h', 'x', 'v', '!':
+						u := strings.ToUpper(string(cell))
+						cells = append(cells, u+u)
+					default:
+						cells = append(cells, string(cell)+" ")
+					}
+				}
+				viewport = append(viewport, strings.Join(cells, ""))
 			}
 		}
 		instability = emptyDefault(m.obs.Dungeon.InstabilityLabel, "-")

@@ -87,3 +87,41 @@ func TestNoDuplicateEventLine(t *testing.T) {
 		t.Fatalf("expected exactly one event line")
 	}
 }
+
+func TestPressureBarWidthStable(t *testing.T) {
+	b1 := pressureBar(1, 20, 12)
+	b2 := pressureBar(19, 20, 12)
+	if len([]rune(b1)) != len([]rune(b2)) {
+		t.Fatalf("expected stable bar width, got %q vs %q", b1, b2)
+	}
+	if len([]rune(b1)) != 14 {
+		t.Fatalf("expected bar width 14 including brackets, got %d", len([]rune(b1)))
+	}
+}
+
+func TestMinimumSizeFallback(t *testing.T) {
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{})
+	m.width = 20
+	m.height = 5
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}}}
+	v := m.View()
+	if !strings.Contains(v, "TERMINAL TOO SMALL") {
+		t.Fatalf("expected fallback message for small terminal")
+	}
+}
+
+func TestHeaderConsistencyContainsLabels(t *testing.T) {
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{})
+	m.width = 120
+	m.height = 30
+	m.energy = 88
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}, InstabilityLabel: "CRITICAL", Pressure: 5, MaxPressure: 20, CoreIntegrity: 97, Threat: "HIGH"}}
+	v := m.View()
+	if !strings.Contains(v, "MODE:") || !strings.Contains(v, "SIGNAL:") || !strings.Contains(v, "INSTABILITY:") || !strings.Contains(v, "ENERGY:") {
+		t.Fatalf("expected header labels to be present")
+	}
+}

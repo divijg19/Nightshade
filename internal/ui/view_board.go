@@ -5,15 +5,8 @@ import (
 	"strings"
 )
 
-func boardRow(i int, s string) string {
-	if len(s) > 72 {
-		s = s[:72]
-	}
-	return fmt.Sprintf("%d) %s", i+1, s)
-}
-
 func renderBoard(m Model) string {
-	viewport := []string{"SIGNAL BOARD", ""}
+	viewport := []string{"IDX  SIGNAL  TYPE       STATE    DECAY  CORR", "------------------------------------------"}
 	instability := "STABLE"
 	if m.obs.Board != nil {
 		for i, sig := range m.obs.Board.Signals {
@@ -27,9 +20,10 @@ func renderBoard(m Model) string {
 			if i == m.obs.Board.Cursor {
 				cursor = ">"
 			}
-			line := fmt.Sprintf("%s%s %s [%s] D:%d C:%d", cursor, sig.ID, strings.ToUpper(sig.Type), state, sig.Decay, sig.Corruption)
-			viewport = append(viewport, boardRow(i, line))
+			line := fmt.Sprintf("%s%-3d %-7s %-10s %-8s %5d %5d", cursor, i+1, sig.ID, strings.ToUpper(sig.Type), state, sig.Decay, sig.Corruption)
+			viewport = append(viewport, line)
 		}
+		viewport = append(viewport, "\x1b[2mQ quick-dive  R resume-last  1..9 enter-signal\x1b[0m")
 	} else {
 		viewport = append(viewport, "No signal data.")
 	}
