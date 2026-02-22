@@ -117,7 +117,7 @@ func (m Model) View() string {
 func (m Model) WantsQuit() bool { return m.quitRequested }
 
 func helpStatus() string {
-	return "Controls: w/a/s/d move e observe . wait f ability 1/2/3 path q dive r resume [/] replay i inspect Ctrl-C quit ? help"
+	return "WASD Move  E Observe  . Wait  F Ability  1/2/3 Path  Q Dive  R Resume  [ ] Replay  I Inspect  ? Help  Ctrl-C Quit"
 }
 
 func buildIntrospectionLine(obs agent.Observation) string {
