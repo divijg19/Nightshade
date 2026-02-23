@@ -18,7 +18,7 @@ import (
 	"github.com/divijg19/Nightshade/internal/terminal"
 )
 
-const version = "v0.3.17"
+const version = "v0.3.18"
 
 func defaultSocket() string {
 	if s := os.Getenv("NIGHTSHADE_SOCKET"); s != "" {
@@ -74,7 +74,7 @@ func runSingleProcess(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return single.Run(single.Options{Dev: *dev, ClientOptions: appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor}})
+	return single.Run(single.Options{Dev: *dev, ClientOptions: appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor, ShowSplash: true}})
 }
 
 func runDiagnose(forceASCII bool, forceNoColor bool) error {

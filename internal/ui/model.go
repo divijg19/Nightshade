@@ -20,6 +20,10 @@ type SnapshotMsg struct {
 
 type connectionClosedMsg struct{}
 
+type ModelOptions struct {
+	ShowSplash bool
+}
+
 type Model struct {
 	incoming <-chan tea.Msg
 	network  NetworkClient
@@ -45,10 +49,11 @@ type Model struct {
 	disconnected  bool
 	width         int
 	height        int
+	showSplash    bool
 }
 
-func NewModel(incoming <-chan tea.Msg, network NetworkClient) Model {
-	return Model{incoming: incoming, network: network, history: make([]agent.Observation, 0, 32)}
+func NewModel(incoming <-chan tea.Msg, network NetworkClient, opts ModelOptions) Model {
+	return Model{incoming: incoming, network: network, history: make([]agent.Observation, 0, 32), showSplash: opts.ShowSplash}
 }
 
 func waitIncoming(ch <-chan tea.Msg) tea.Cmd {
@@ -108,6 +113,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.showSplash {
+		return renderSplash(m)
+	}
 	if !m.hasObs {
 		return "Connecting..."
 	}

@@ -26,7 +26,7 @@ func (s *stubNet) Disconnect() error {
 func TestRouterDeterministicForSnapshot(t *testing.T) {
 	in := make(chan tea.Msg, 1)
 	net := &stubNet{}
-	m := NewModel(in, net)
+	m := NewModel(in, net, ModelOptions{})
 	m.obs = agent.Observation{Mode: "board", Board: &agent.BoardView{Signals: []agent.SignalView{{ID: "S000", Type: "NULL"}}}}
 	m.energy = 100
 	m.hasObs = true
@@ -39,7 +39,7 @@ func TestRouterDeterministicForSnapshot(t *testing.T) {
 
 func TestResizeUpdatesModelState(t *testing.T) {
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	next := updated.(Model)
 	if next.width != 120 || next.height != 40 {
@@ -49,7 +49,7 @@ func TestResizeUpdatesModelState(t *testing.T) {
 
 func TestSnapshotMsgUpdatesModelState(t *testing.T) {
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	obs := agent.Observation{Mode: "board", Tick: 9, Board: &agent.BoardView{Signals: []agent.SignalView{{ID: "S000", Type: "NULL"}}}}
 	updated, _ := m.Update(SnapshotMsg{Obs: obs, Energy: 73})
 	next := updated.(Model)
@@ -66,7 +66,7 @@ func TestSnapshotMsgUpdatesModelState(t *testing.T) {
 
 func TestSnapshotNotMutatedByView(t *testing.T) {
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	obs := agent.Observation{Mode: "board", Board: &agent.BoardView{Signals: []agent.SignalView{{ID: "S000", Type: "NULL", Corruption: 1}}}}
 	m.obs = obs
 	m.hasObs = true
@@ -78,7 +78,7 @@ func TestSnapshotNotMutatedByView(t *testing.T) {
 
 func TestNoDuplicateEventLine(t *testing.T) {
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	m.obs = agent.Observation{Mode: "dungeon", Event: "Only once", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###"), []rune("#.#"), []rune("###")}, Pressure: 1, MaxPressure: 20, CoreIntegrity: 100, Threat: "LOW"}}
 	m.energy = 100
 	m.hasObs = true
@@ -89,19 +89,20 @@ func TestNoDuplicateEventLine(t *testing.T) {
 }
 
 func TestPressureBarWidthStable(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
 	b1 := pressureBar(1, 20, 12)
 	b2 := pressureBar(19, 20, 12)
-	if len([]rune(b1)) != len([]rune(b2)) {
+	if displayWidth(b1) != displayWidth(b2) {
 		t.Fatalf("expected stable bar width, got %q vs %q", b1, b2)
 	}
-	if len([]rune(b1)) != 14 {
-		t.Fatalf("expected bar width 14 including brackets, got %d", len([]rune(b1)))
+	if displayWidth(b1) != 14 {
+		t.Fatalf("expected bar width 14 including brackets, got %d", displayWidth(b1))
 	}
 }
 
 func TestMinimumSizeFallback(t *testing.T) {
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	m.width = 40
 	m.height = 10
 	m.hasObs = true
@@ -113,15 +114,91 @@ func TestMinimumSizeFallback(t *testing.T) {
 }
 
 func TestHeaderConsistencyContainsLabels(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
 	in := make(chan tea.Msg, 1)
-	m := NewModel(in, &stubNet{})
+	m := NewModel(in, &stubNet{}, ModelOptions{})
 	m.width = 120
 	m.height = 30
 	m.energy = 88
 	m.hasObs = true
 	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}, InstabilityLabel: "CRITICAL", Pressure: 5, MaxPressure: 20, CoreIntegrity: 97, Threat: "HIGH"}}
 	v := m.View()
-	if !strings.Contains(v, "MODE:") || !strings.Contains(v, "SIGNAL:") || !strings.Contains(v, "INSTABILITY:") || !strings.Contains(v, "ENERGY:") {
-		t.Fatalf("expected header labels to be present")
+	if !strings.Contains(v, "NIGHTSHADE") || !strings.Contains(v, "DUNGEON") || !strings.Contains(v, "STABILITY:") || !strings.Contains(v, "PHASE:") {
+		t.Fatalf("expected header labels to be present, got:\n%s", v)
+	}
+}
+
+func TestUnicodeFrameBorderRendering(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	chars := currentFrameCharset()
+	if chars.tl != '╭' || chars.bl != '╰' || chars.v != '│' {
+		t.Fatalf("expected unicode frame charset")
+	}
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+	m.energy = 50
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###"), []rune("#@#"), []rune("###")}, InstabilityLabel: "UNSTABLE", Phase: "HUNTER", Pressure: 6, MaxPressure: 20, CoreIntegrity: 62, Threat: "HIGH"}}
+	v := m.View()
+	if !strings.Contains(v, "NIGHTSHADE") {
+		t.Fatalf("expected branded unicode frame output")
+	}
+}
+
+func TestASCIIBorderFallback(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: true, ColorLevel: ColorNone})
+	defer SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	chars := currentFrameCharset()
+	if chars.tl != '+' || chars.h != '-' || chars.v != '|' {
+		t.Fatalf("expected ASCII frame charset")
+	}
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+	m.energy = 50
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	v := m.View()
+	if !strings.Contains(v, "NIGHTSHADE - DUNGEON") {
+		t.Fatalf("expected ASCII frame border characters")
+	}
+	if strings.Contains(v, "NIGHTSHADE — DUNGEON") {
+		t.Fatalf("did not expect unicode frame in ASCII mode")
+	}
+}
+
+func TestSplashScreenBehavior(t *testing.T) {
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{ShowSplash: true})
+	m.width = 100
+	m.height = 28
+	if !strings.Contains(m.View(), "Press any key") {
+		t.Fatalf("expected splash prompt")
+	}
+	nextAny, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	nm := nextAny.(Model)
+	if nm.showSplash {
+		t.Fatalf("expected splash to dismiss on any key")
+	}
+}
+
+func TestNoLayoutDriftOnResize(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###"), []rune("#@#"), []rune("###")}, InstabilityLabel: "DANGEROUS", Phase: "HUNTER", Pressure: 9, MaxPressure: 20, CoreIntegrity: 54, Threat: "HIGH"}}
+	for _, width := range []int{80, 100, 120} {
+		m.width = width
+		m.height = 24
+		out := m.View()
+		for _, line := range strings.Split(out, "\n") {
+			if displayWidth(line) != width {
+				t.Fatalf("line width drift for width=%d got=%d line=%q", width, displayWidth(line), line)
+			}
+		}
 	}
 }

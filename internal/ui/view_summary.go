@@ -3,17 +3,17 @@ package ui
 import "fmt"
 
 func renderSummary(m Model) string {
-	viewport := []string{"RUN SUMMARY", ""}
+	rows := []string{"RUN SUMMARY", ""}
 	if m.obs.RunSummary != nil {
 		rs := m.obs.RunSummary
-		viewport = append(viewport, fmt.Sprintf("Result: %s", emptyDefault(rs.ResultType, "unknown")))
-		viewport = append(viewport, fmt.Sprintf("Peak Pressure: %d/%d", rs.PeakPressure, rs.MaxPressure))
-		viewport = append(viewport, fmt.Sprintf("Fragments: +%d", rs.FragmentsGained))
-		viewport = append(viewport, fmt.Sprintf("Skill XP: +%d", rs.SkillXP))
-		viewport = append(viewport, fmt.Sprintf("Time in Signal: %d", rs.TimeInSignal))
-		viewport = append(viewport, fmt.Sprintf("Threat: %s", emptyDefault(rs.ThreatLevel, "-")))
+		rows = append(rows, fmt.Sprintf("RESULT: %s", emptyDefault(rs.ResultType, "unknown")))
+		rows = append(rows, fmt.Sprintf("PEAK PRESSURE: %d/%d", rs.PeakPressure, rs.MaxPressure))
+		rows = append(rows, fmt.Sprintf("FRAGMENTS: +%d", rs.FragmentsGained))
+		rows = append(rows, fmt.Sprintf("SKILL XP: +%d", rs.SkillXP))
+		rows = append(rows, fmt.Sprintf("TIME IN SIGNAL: %d", rs.TimeInSignal))
+		rows = append(rows, fmt.Sprintf("THREAT: %s", emptyDefault(rs.ThreatLevel, "-")))
 	} else {
-		viewport = append(viewport, "No run summary available.")
+		rows = append(rows, "NO RUN SUMMARY AVAILABLE")
 	}
-	return layout5Zones(m, viewport, "STABLE")
+	return layoutFramed(m, brandedHeader("SIGNAL BOARD"), "STABILITY: "+styleColor(ColorSuccess, "STABLE"), "PHASE: SUMMARY", ColorBorder, ColorPrimary, rows, prioritizedEvent(m), styleDim("META: Q"))
 }

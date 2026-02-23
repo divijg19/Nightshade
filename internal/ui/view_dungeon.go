@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/divijg19/Nightshade/internal/agent"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -106,15 +105,15 @@ func strongThreat(threat string, instability string) string {
 		t = "-"
 	}
 	if t == "CRITICAL" || i == "CRITICAL" {
-		return styleDanger("CRITICAL", true)
+		return styleBoldColor(ColorCritical, "CRITICAL")
 	}
 	if t == "HIGH" || i == "DANGEROUS" {
-		return styleDanger("HIGH", false)
+		return styleColor(ColorDanger, "HIGH")
 	}
 	if t == "MEDIUM" || i == "UNSTABLE" {
-		return styleWarn("MEDIUM")
+		return styleColor(ColorWarning, "MEDIUM")
 	}
-	return styleDim("LOW")
+	return styleColor(ColorSuccess, "LOW")
 }
 
 func pressureBar(pressure, maxPressure int, width int) string {
@@ -122,12 +121,41 @@ func pressureBar(pressure, maxPressure int, width int) string {
 		width = 12
 	}
 	if maxPressure <= 0 {
-		return "[" + strings.Repeat("-", width) + "]"
+		if currentPresentationOptions().ASCIIMode {
+			return "[" + strings.Repeat("-", width) + "]"
+		}
+		return "[" + strings.Repeat("░", width) + "]"
 	}
 	ratio := float64(pressure) / float64(maxPressure)
 	fill := int(ratio * float64(width))
 	fill = clamp(fill, 0, width)
-	return "[" + strings.Repeat("#", fill) + strings.Repeat("-", width-fill) + "]"
+
+	var b strings.Builder
+	b.WriteString("[")
+	for i := 0; i < width; i++ {
+		if i < fill {
+			ch := "#"
+			if !currentPresentationOptions().ASCIIMode {
+				ch = "█"
+			}
+			r := float64(i+1) / float64(width)
+			tok := ColorSuccess
+			if r >= 0.80 {
+				tok = ColorDanger
+			} else if r >= 0.50 {
+				tok = ColorWarning
+			}
+			b.WriteString(styleColor(tok, ch))
+			continue
+		}
+		if currentPresentationOptions().ASCIIMode {
+			b.WriteString("-")
+		} else {
+			b.WriteString(styleColor(ColorDim, "░"))
+		}
+	}
+	b.WriteString("]")
+	return b.String()
 }
 
 func channelBar(active bool, tick int, width int) string {
@@ -138,7 +166,17 @@ func channelBar(active bool, tick int, width int) string {
 	if active {
 		fill = clamp(tick, 1, width)
 	}
-	return "[" + strings.Repeat("=", fill) + strings.Repeat("-", width-fill) + "]"
+	var b strings.Builder
+	b.WriteString("[")
+	for i := 0; i < width; i++ {
+		if i < fill {
+			b.WriteString(styleColor(ColorAccent, "="))
+			continue
+		}
+		b.WriteString(styleColor(ColorDim, "-"))
+	}
+	b.WriteString("]")
+	return b.String()
 }
 
 func prioritizedEvent(m Model) string {
@@ -157,18 +195,80 @@ func prioritizedEvent(m Model) string {
 	return styleDim("…")
 }
 
-func selectedSignalID(obsMode string, boardSignals int, boardCursor int, signalID string) string {
-	if signalID != "" {
-		return signalID
-	}
-	if obsMode != "board" || boardSignals == 0 {
-		return "-"
-	}
-	idx := clamp(boardCursor, 0, boardSignals-1)
-	return fmt.Sprintf("#%d", idx+1)
+type frameCharset struct {
+	tl rune
+	tr rune
+	bl rune
+	br rune
+	h  rune
+	v  rune
+	lm rune
+	rm rune
 }
 
-func layout5Zones(m Model, viewport []string, instability string) string {
+func currentFrameCharset() frameCharset {
+	if currentPresentationOptions().ASCIIMode {
+		return frameCharset{tl: '+', tr: '+', bl: '+', br: '+', h: '-', v: '|', lm: '+', rm: '+'}
+	}
+	return frameCharset{tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', lm: '├', rm: '┤'}
+}
+
+func frameLine(left rune, fill rune, right rune, width int, token SemanticColor) string {
+	if width <= 1 {
+		return ""
+	}
+	middle := strings.Repeat(string(fill), width-2)
+	return styleColor(token, string(left)+middle+string(right))
+}
+
+func frameContent(width int, text string, borderToken SemanticColor) string {
+	if width <= 1 {
+		return ""
+	}
+	chars := currentFrameCharset()
+	inner := fitLine(text, width-2)
+	return styleColor(borderToken, string(chars.v)) + inner + styleColor(borderToken, string(chars.v))
+}
+
+func stabilityToken(stability string) SemanticColor {
+	s := strings.ToUpper(strings.TrimSpace(stability))
+	switch s {
+	case "CRITICAL":
+		return ColorCritical
+	case "DANGEROUS", "HIGH":
+		return ColorDanger
+	case "UNSTABLE", "MEDIUM":
+		return ColorWarning
+	default:
+		return ColorSuccess
+	}
+}
+
+func phaseToken(phase string) SemanticColor {
+	p := strings.ToUpper(strings.TrimSpace(phase))
+	if p == "" || p == "-" {
+		return ColorMuted
+	}
+	if p == "HUNTER" || p == "AGGRESSOR" {
+		return ColorHighlight
+	}
+	if p == "STABILIZER" {
+		return ColorSuccess
+	}
+	if p == "HARVESTER" {
+		return ColorWarning
+	}
+	return ColorAccent
+}
+
+func brandedHeader(suffix string) string {
+	if currentPresentationOptions().ASCIIMode {
+		return "NIGHTSHADE - " + strings.ToUpper(suffix)
+	}
+	return "NIGHTSHADE — " + strings.ToUpper(suffix)
+}
+
+func layoutFramed(m Model, title string, subtitleLeft string, subtitleRight string, borderToken SemanticColor, primaryToken SemanticColor, bodyLines []string, eventLine string, footerLine string) string {
 	width := m.width
 	if width <= 0 {
 		width = 80
@@ -194,62 +294,137 @@ func layout5Zones(m Model, viewport []string, instability string) string {
 		return joinLines(out)
 	}
 
-	signalID := selectedSignalID(m.obs.Mode, lenSignalList(m.obs), cursorValue(m.obs), m.lastSignalID)
-	header := fmt.Sprintf("MODE:%-7s  SIGNAL:%-6s  INSTABILITY:%-9s  ENERGY:%3d", strings.ToUpper(emptyDefault(m.obs.Mode, "board")), signalID, strings.ToUpper(emptyDefault(instability, "-")), m.energy)
+	chars := currentFrameCharset()
+	innerWidth := width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
+	titleLine := styleColor(primaryToken, strings.ToUpper(title))
+	subLine := subtitleLeft
+	if strings.TrimSpace(subtitleRight) != "" {
+		rightLabel := styleColor(phaseToken(subtitleRight), strings.ToUpper(subtitleRight))
+		rightWidth := displayWidth(rightLabel)
+		left := trimToDisplayWidth(subLine, innerWidth)
+		leftWidth := displayWidth(left)
+		if rightWidth < innerWidth && leftWidth+1+rightWidth <= innerWidth {
+			left = trimToDisplayWidth(left, innerWidth-rightWidth-1)
+			leftWidth = displayWidth(left)
+			left = left + strings.Repeat(" ", innerWidth-leftWidth-rightWidth) + rightLabel
+		}
+		subLine = left
+	}
+
+	fixedRows := 9
+	bodyRows := height - fixedRows
+	if bodyRows < 1 {
+		bodyRows = 1
+	}
+	start := 0
+	if len(bodyLines) > bodyRows {
+		start = (len(bodyLines) - bodyRows) / 2
+	}
+	end := start + bodyRows
+	if end > len(bodyLines) {
+		end = len(bodyLines)
+	}
+	trimmed := bodyLines[start:end]
+	padding := bodyRows - len(trimmed)
+
+	lines := make([]string, 0, height)
+	lines = append(lines, frameLine(chars.tl, chars.h, chars.tr, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(titleLine, innerWidth), borderToken))
+	lines = append(lines, frameContent(width, fitLine(subLine, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	for i := 0; i < padding/2; i++ {
+		lines = append(lines, frameContent(width, strings.Repeat(" ", innerWidth), borderToken))
+	}
+	for _, row := range trimmed {
+		lines = append(lines, frameContent(width, fitLine(centerLine(row, innerWidth), innerWidth), borderToken))
+	}
+	for len(lines) < 4+bodyRows {
+		lines = append(lines, frameContent(width, strings.Repeat(" ", innerWidth), borderToken))
+	}
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(eventLine, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(footerLine, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.bl, chars.h, chars.br, width, borderToken))
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return joinLines(lines)
+}
+
+func layout5Zones(m Model, viewport []string, instability string) string {
+	phase := "-"
 	pressure, maxPressure := 0, 0
 	coreIntegrity := 0
 	threat := "-"
 	exitBar := channelBar(false, 0, 6)
+	enraged := false
 	if m.obs.Dungeon != nil {
 		pressure = m.obs.Dungeon.Pressure
 		maxPressure = m.obs.Dungeon.MaxPressure
 		coreIntegrity = m.obs.Dungeon.CoreIntegrity
 		threat = emptyDefault(m.obs.Dungeon.Threat, "-")
 		exitBar = channelBar(m.obs.Dungeon.ExitChanneling, m.obs.Dungeon.ExitChannelTick, 6)
+		phase = emptyDefault(m.obs.Dungeon.Phase, "-")
+		enraged = m.obs.Dungeon.Enraged
 	}
-	state := fmt.Sprintf("PRESSURE:%s %2d/%-2d  CORE:%3d%%  THREAT:%s  EXIT:%s", pressureBar(pressure, maxPressure, 12), pressure, maxPressure, coreIntegrity, strongThreat(threat, instability), exitBar)
+	state1 := fmt.Sprintf("PRESSURE: %s  %2d/%-2d", pressureBar(pressure, maxPressure, 12), pressure, maxPressure)
+	state2 := fmt.Sprintf("CORE: %3d%%  THREAT: %s  CHANNEL: %s", coreIntegrity, strongThreat(threat, instability), exitBar)
 
 	event := prioritizedEvent(m)
-	footer := "WASD Move  E Observe  . Wait  F Ability  1/2/3 Path  Q Dive  R Resume  [ ] Replay  I Inspect  ? Help  Ctrl-C Quit"
+	footer := styleColor(ColorPrimary, "MOVEMENT: ↑↓←→") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+	if currentPresentationOptions().ASCIIMode {
+		footer = styleColor(ColorPrimary, "MOVEMENT: WASD") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+	}
+	body := make([]string, 0, len(viewport)+2)
+	body = append(body, state1)
+	body = append(body, state2)
+	body = append(body, "")
+	body = append(body, viewport...)
 
-	viewportRows := height - 4
-	if viewportRows < 1 {
-		viewportRows = 1
+	borderToken := ColorBorder
+	if strings.EqualFold(instability, "CRITICAL") {
+		borderToken = ColorCritical
 	}
+	headerToken := ColorPrimary
+	if enraged {
+		headerToken = ColorHighlight
+	}
+	stabilityLine := "STABILITY: " + styleColor(stabilityToken(instability), strings.ToUpper(emptyDefault(instability, "STABLE")))
+	phaseLine := "PHASE: " + strings.ToUpper(phase)
+	return layoutFramed(m, brandedHeader("DUNGEON"), stabilityLine, phaseLine, borderToken, headerToken, body, event, footer)
+}
 
-	start := 0
-	if len(viewport) > viewportRows {
-		start = (len(viewport) - viewportRows) / 2
+func renderSplash(m Model) string {
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	end := start + viewportRows
-	if end > len(viewport) {
-		end = len(viewport)
+	height := m.height
+	if height <= 0 {
+		height = 24
 	}
-	trimmed := viewport[start:end]
-
-	gridLines := make([]string, 0, viewportRows)
-	verticalPad := viewportRows - len(trimmed)
-	for i := 0; i < verticalPad/2; i++ {
-		gridLines = append(gridLines, strings.Repeat(" ", width))
+	if width < minUIWidth || height < minUIHeight {
+		return fitLine("Terminal too small. Resize to at least 80x24.", width)
 	}
-	for _, row := range trimmed {
-		gridLines = append(gridLines, fitLine(centerLine(row, width), width))
+	borderToken := ColorBorder
+	inner := width - 2
+	lines := []string{
+		"",
+		centerLine(styleBoldColor(ColorPrimary, "NIGHTSHADE"), inner),
+		centerLine(styleColor(ColorAccent, "v0.3.18"), inner),
+		"",
+		centerLine(styleColor(ColorMuted, "A deterministic signal"), inner),
+		centerLine(styleColor(ColorMuted, "stabilization protocol"), inner),
+		"",
+		centerLine(styleColor(ColorHighlight, "Press any key"), inner),
+		"",
 	}
-	for len(gridLines) < viewportRows {
-		gridLines = append(gridLines, strings.Repeat(" ", width))
-	}
-
-	lines := make([]string, 0, height)
-	lines = append(lines, fitLine(header, width))
-	lines = append(lines, fitLine(state, width))
-	lines = append(lines, gridLines...)
-	lines = append(lines, fitLine(event, width))
-	lines = append(lines, fitLine(footer, width))
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	return joinLines(lines)
+	return layoutFramed(m, "", "", "", borderToken, ColorPrimary, lines, "", "")
 }
 
 func renderDungeon(m Model) string {
@@ -297,18 +472,4 @@ func emptyDefault(s, d string) string {
 		return d
 	}
 	return s
-}
-
-func lenSignalList(obs agent.Observation) int {
-	if obs.Board == nil {
-		return 0
-	}
-	return len(obs.Board.Signals)
-}
-
-func cursorValue(obs agent.Observation) int {
-	if obs.Board == nil {
-		return 0
-	}
-	return obs.Board.Cursor
 }
