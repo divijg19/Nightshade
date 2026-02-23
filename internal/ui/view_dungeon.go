@@ -376,15 +376,10 @@ func layout5Zones(m Model, viewport []string, instability string) string {
 	state2 := fmt.Sprintf("CORE: %3d%%  THREAT: %s  CHANNEL: %s", coreIntegrity, strongThreat(threat, instability), exitBar)
 
 	event := prioritizedEvent(m)
-	footer := styleColor(ColorPrimary, "MOVEMENT: ↑↓←→") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+	footer := styleColor(ColorPrimary, "MOVEMENT ↑↓←→") + "   " + styleColor(ColorAccent, "ACTIONS O H D") + "   " + styleDim("Q Quit")
 	if currentPresentationOptions().ASCIIMode {
-		footer = styleColor(ColorPrimary, "MOVEMENT: WASD") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+		footer = styleColor(ColorPrimary, "MOVEMENT WASD") + "   " + styleColor(ColorAccent, "ACTIONS O H D") + "   " + styleDim("Q Quit")
 	}
-	body := make([]string, 0, len(viewport)+2)
-	body = append(body, state1)
-	body = append(body, state2)
-	body = append(body, "")
-	body = append(body, viewport...)
 
 	borderToken := ColorBorder
 	if strings.EqualFold(instability, "CRITICAL") {
@@ -394,9 +389,83 @@ func layout5Zones(m Model, viewport []string, instability string) string {
 	if enraged {
 		headerToken = ColorHighlight
 	}
+
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	height := m.height
+	if height <= 0 {
+		height = 24
+	}
+	if width < minUIWidth || height < minUIHeight {
+		out := make([]string, 0, height)
+		out = append(out, fitLine("Nightshade", width))
+		for len(out) < height-1 {
+			if len(out) == (height/2)-1 {
+				out = append(out, fitLine("Terminal too small.", width))
+			} else if len(out) == (height / 2) {
+				out = append(out, fitLine("Resize to at least 80x24.", width))
+			} else {
+				out = append(out, strings.Repeat(" ", width))
+			}
+		}
+		out = append(out, strings.Repeat(" ", width))
+		return joinLines(out)
+	}
+
+	chars := currentFrameCharset()
+	innerWidth := width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+
 	stabilityLine := "STABILITY: " + styleColor(stabilityToken(instability), strings.ToUpper(emptyDefault(instability, "STABLE")))
-	phaseLine := "PHASE: " + strings.ToUpper(phase)
-	return layoutFramed(m, brandedHeader("DUNGEON"), stabilityLine, phaseLine, borderToken, headerToken, body, event, footer)
+	phaseLine := "PHASE: " + styleColor(phaseToken(phase), strings.ToUpper(phase))
+
+	fixedRows := 13
+	gridRows := height - fixedRows
+	if gridRows < 1 {
+		gridRows = 1
+	}
+	start := 0
+	if len(viewport) > gridRows {
+		start = (len(viewport) - gridRows) / 2
+	}
+	end := start + gridRows
+	if end > len(viewport) {
+		end = len(viewport)
+	}
+	trimmed := viewport[start:end]
+	gridPad := gridRows - len(trimmed)
+
+	lines := make([]string, 0, height)
+	lines = append(lines, frameLine(chars.tl, chars.h, chars.tr, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(styleColor(headerToken, brandedHeader("DUNGEON")), innerWidth), borderToken))
+	lines = append(lines, frameContent(width, fitLine(stabilityLine, innerWidth), borderToken))
+	lines = append(lines, frameContent(width, fitLine(phaseLine, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(state1, innerWidth), borderToken))
+	lines = append(lines, frameContent(width, fitLine(state2, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	for i := 0; i < gridPad/2; i++ {
+		lines = append(lines, frameContent(width, strings.Repeat(" ", innerWidth), borderToken))
+	}
+	for _, row := range trimmed {
+		lines = append(lines, frameContent(width, fitLine(centerLine(row, innerWidth), innerWidth), borderToken))
+	}
+	for len(lines) < 8+gridRows {
+		lines = append(lines, frameContent(width, strings.Repeat(" ", innerWidth), borderToken))
+	}
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(event, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.lm, chars.h, chars.rm, width, borderToken))
+	lines = append(lines, frameContent(width, fitLine(footer, innerWidth), borderToken))
+	lines = append(lines, frameLine(chars.bl, chars.h, chars.br, width, borderToken))
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return joinLines(lines)
 }
 
 func renderSplash(m Model) string {
@@ -443,7 +512,7 @@ func renderDungeon(m Model) string {
 					case '#':
 						cells = append(cells, "##")
 					case '@':
-						cells = append(cells, "@@")
+						cells = append(cells, styleColor(ColorHighlight, "@")+" ")
 					case 'C', 'c':
 						cells = append(cells, "CC")
 					case 'E', 'e':
