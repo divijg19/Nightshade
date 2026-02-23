@@ -23,7 +23,7 @@ func renderBoard(m Model) string {
 			line := fmt.Sprintf("%s%-3d %-7s %-10s %-8s %5d %5d", cursor, i+1, sig.ID, strings.ToUpper(sig.Type), state, sig.Decay, sig.Corruption)
 			viewport = append(viewport, line)
 		}
-		viewport = append(viewport, "\x1b[2mQ quick-dive  R resume-last  1..9 enter-signal\x1b[0m")
+		viewport = append(viewport, styleDim("Q quick-dive  R resume-last  1..9 enter-signal"))
 	} else {
 		viewport = append(viewport, "No signal data.")
 	}

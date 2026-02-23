@@ -219,6 +219,8 @@ Installed binary equivalents:
 ```bash
 nightshade server
 nightshade client
+nightshade --version
+nightshade --diagnose
 ```
 
 The client always runs as a **full-screen TUI** (alternate screen mode).
@@ -242,6 +244,16 @@ TCP multiplayer transport (`--addr`):
 ```bash
 go run ./cmd/nightshade -- server --addr :4000
 go run ./cmd/nightshade -- client --addr :4000
+```
+
+Terminal compatibility toggles:
+
+```bash
+nightshade --ascii
+nightshade --no-color
+nightshade --diagnose --ascii
+NO_COLOR=1 nightshade
+NO_UNICODE=1 nightshade
 ```
 
 ### Controls
