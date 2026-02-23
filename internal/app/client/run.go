@@ -17,6 +17,7 @@ const terminalRestoreSequence = "\x1b[?25h\x1b[?1049l\x1b[0m"
 type RunOptions struct {
 	ForceASCII   bool
 	ForceNoColor bool
+	ShowSplash   bool
 }
 
 type networkAdapter struct {
@@ -62,7 +63,7 @@ func RunClientWithOptions(t transport.Transport, opts RunOptions) (runErr error)
 		}(caps.ColorLevel),
 	})
 
-	app := ui.New(networkAdapter{transport: t})
+	app := ui.NewWithOptions(networkAdapter{transport: t}, ui.AppOptions{ShowSplash: opts.ShowSplash})
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)

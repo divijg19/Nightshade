@@ -15,6 +15,10 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitRequested = true
 		return m, tea.Quit
 	}
+	if m.showSplash {
+		m.showSplash = false
+		return m, nil
+	}
 	if key == "?" {
 		m.showHelp = !m.showHelp
 		if m.showHelp {

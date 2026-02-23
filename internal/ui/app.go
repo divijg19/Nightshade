@@ -17,11 +17,19 @@ type App struct {
 	program  *tea.Program
 }
 
+type AppOptions struct {
+	ShowSplash bool
+}
+
 var newProgram = tea.NewProgram
 
 func New(network NetworkClient) *App {
+	return NewWithOptions(network, AppOptions{})
+}
+
+func NewWithOptions(network NetworkClient, opts AppOptions) *App {
 	incoming := make(chan tea.Msg, 64)
-	m := NewModel(incoming, network)
+	m := NewModel(incoming, network, ModelOptions{ShowSplash: opts.ShowSplash})
 	p := newProgram(m, tea.WithAltScreen())
 	return &App{incoming: incoming, program: p}
 }

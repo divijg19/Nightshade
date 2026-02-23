@@ -6,8 +6,7 @@ import (
 )
 
 func renderBoard(m Model) string {
-	viewport := []string{"IDX  SIGNAL  TYPE       STATE    DECAY  CORR", "------------------------------------------"}
-	instability := "STABLE"
+	rows := []string{"IDX SIGNAL   TYPE       STATE    DECAY  CORR", "--- -------- ---------- -------- ----- -----"}
 	if m.obs.Board != nil {
 		for i, sig := range m.obs.Board.Signals {
 			state := "OPEN"
@@ -20,17 +19,23 @@ func renderBoard(m Model) string {
 			if i == m.obs.Board.Cursor {
 				cursor = ">"
 			}
-			line := fmt.Sprintf("%s%-3d %-7s %-10s %-8s %5d %5d", cursor, i+1, sig.ID, strings.ToUpper(sig.Type), state, sig.Decay, sig.Corruption)
-			viewport = append(viewport, line)
+			line := fmt.Sprintf("%s%-3d %-8s %-10s %-8s %5d %5d", cursor, i+1, sig.ID, strings.ToUpper(sig.Type), state, sig.Decay, sig.Corruption)
+			rows = append(rows, line)
 		}
-		viewport = append(viewport, styleDim("Q quick-dive  R resume-last  1..9 enter-signal"))
 	} else {
-		viewport = append(viewport, "No signal data.")
+		rows = append(rows, "NO SIGNAL DATA")
 	}
+	rows = append(rows, "")
+	rows = append(rows, styleColor(ColorAccent, "QUICK DIVE: Q")+"   "+styleColor(ColorPrimary, "RESUME: R")+"   "+styleDim("ENTER: 1..9"))
 	if m.obs.RunSummary != nil {
-		viewport = append(viewport, "")
-		viewport = append(viewport, fmt.Sprintf("RUN %s", strings.ToUpper(emptyDefault(m.obs.RunSummary.ResultType, "unknown"))))
-		viewport = append(viewport, fmt.Sprintf("PEAK %d/%d  FRAG +%d  XP +%d", m.obs.RunSummary.PeakPressure, m.obs.RunSummary.MaxPressure, m.obs.RunSummary.FragmentsGained, m.obs.RunSummary.SkillXP))
+		rows = append(rows, "")
+		rows = append(rows, fmt.Sprintf("RUN: %s", strings.ToUpper(emptyDefault(m.obs.RunSummary.ResultType, "UNKNOWN"))))
+		rows = append(rows, fmt.Sprintf("PEAK: %d/%d  FRAG: +%d  XP: +%d", m.obs.RunSummary.PeakPressure, m.obs.RunSummary.MaxPressure, m.obs.RunSummary.FragmentsGained, m.obs.RunSummary.SkillXP))
 	}
-	return layout5Zones(m, viewport, instability)
+	event := prioritizedEvent(m)
+	footer := styleColor(ColorPrimary, "MOVEMENT: ↑↓←→") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+	if currentPresentationOptions().ASCIIMode {
+		footer = styleColor(ColorPrimary, "MOVEMENT: WASD") + "   " + styleColor(ColorAccent, "ACTIONS: O H D") + "   " + styleDim("META: Q")
+	}
+	return layoutFramed(m, brandedHeader("SIGNAL BOARD"), "STABILITY: "+styleColor(ColorSuccess, "STABLE"), "PHASE: BOARD", ColorBorder, ColorPrimary, rows, event, footer)
 }
