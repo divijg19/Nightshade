@@ -2,15 +2,19 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/mattn/go-runewidth"
 )
 
 const (
-	minUIWidth  = 52
-	minUIHeight = 7
+	minUIWidth  = 80
+	minUIHeight = 24
 )
+
+var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func joinLines(lines []string) string {
 	if len(lines) == 0 {
@@ -33,26 +37,66 @@ func fitLine(line string, width int) string {
 	if width <= 0 {
 		return line
 	}
-	runes := []rune(line)
-	if len(runes) > width {
-		return string(runes[:width])
+	line = sanitizeGlyphsPreserveANSI(line)
+	if displayWidth(line) > width {
+		line = trimToDisplayWidth(line, width)
 	}
-	if len(runes) == width {
+	w := displayWidth(line)
+	if w == width {
 		return line
 	}
-	return line + strings.Repeat(" ", width-len(runes))
+	return line + strings.Repeat(" ", width-w)
 }
 
 func centerLine(line string, width int) string {
 	if width <= 0 {
 		return line
 	}
-	r := []rune(line)
-	if len(r) >= width {
-		return string(r[:width])
+	line = sanitizeGlyphsPreserveANSI(line)
+	w := displayWidth(line)
+	if w >= width {
+		return trimToDisplayWidth(line, width)
 	}
-	pad := (width - len(r)) / 2
-	return strings.Repeat(" ", pad) + line + strings.Repeat(" ", width-len(r)-pad)
+	pad := (width - w) / 2
+	return strings.Repeat(" ", pad) + line + strings.Repeat(" ", width-w-pad)
+}
+
+func stripANSI(s string) string {
+	if s == "" {
+		return s
+	}
+	return ansiEscapeRegex.ReplaceAllString(s, "")
+}
+
+func displayWidth(s string) int {
+	return runewidth.StringWidth(stripANSI(s))
+}
+
+func trimToDisplayWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if strings.Contains(s, "\x1b[") {
+		s = stripANSI(s)
+	}
+	if displayWidth(s) <= width {
+		return s
+	}
+	var b strings.Builder
+	cur := 0
+	for _, r := range s {
+		r = normalizeGlyph(r)
+		rw := runewidth.RuneWidth(r)
+		if rw < 0 {
+			rw = 0
+		}
+		if cur+rw > width {
+			break
+		}
+		b.WriteRune(r)
+		cur += rw
+	}
+	return b.String()
 }
 
 func strongThreat(threat string, instability string) string {
@@ -62,15 +106,15 @@ func strongThreat(threat string, instability string) string {
 		t = "-"
 	}
 	if t == "CRITICAL" || i == "CRITICAL" {
-		return "\x1b[1;31mCRITICAL\x1b[0m"
+		return styleDanger("CRITICAL", true)
 	}
 	if t == "HIGH" || i == "DANGEROUS" {
-		return "\x1b[31mHIGH\x1b[0m"
+		return styleDanger("HIGH", false)
 	}
 	if t == "MEDIUM" || i == "UNSTABLE" {
-		return "\x1b[33mMEDIUM\x1b[0m"
+		return styleWarn("MEDIUM")
 	}
-	return "\x1b[2mLOW\x1b[0m"
+	return styleDim("LOW")
 }
 
 func pressureBar(pressure, maxPressure int, width int) string {
@@ -99,15 +143,18 @@ func channelBar(active bool, tick int, width int) string {
 
 func prioritizedEvent(m Model) string {
 	if strings.TrimSpace(m.obs.Event) != "" {
-		return m.obs.Event
+		return sanitizeGlyphsPreserveANSI(m.obs.Event)
 	}
 	if m.obs.Dungeon != nil && strings.TrimSpace(m.obs.Dungeon.Event) != "" {
-		return m.obs.Dungeon.Event
+		return sanitizeGlyphsPreserveANSI(m.obs.Dungeon.Event)
 	}
 	if strings.TrimSpace(m.status) != "" {
-		return m.status
+		return sanitizeGlyphsPreserveANSI(m.status)
 	}
-	return "\x1b[2m…\x1b[0m"
+	if currentPresentationOptions().ASCIIMode {
+		return styleDim("...")
+	}
+	return styleDim("…")
 }
 
 func selectedSignalID(obsMode string, boardSignals int, boardCursor int, signalID string) string {
@@ -132,17 +179,18 @@ func layout5Zones(m Model, viewport []string, instability string) string {
 	}
 
 	if width < minUIWidth || height < minUIHeight {
-		msg := fmt.Sprintf("TERMINAL TOO SMALL (%dx%d) — resize to at least %dx%d", width, height, minUIWidth, minUIHeight)
 		out := make([]string, 0, height)
-		out = append(out, fitLine("NIGHTSHADE", width))
+		out = append(out, fitLine("Nightshade", width))
 		for len(out) < height-1 {
-			if len(out) == (height / 2) {
-				out = append(out, fitLine(msg, width))
+			if len(out) == (height/2)-1 {
+				out = append(out, fitLine("Terminal too small.", width))
+			} else if len(out) == (height / 2) {
+				out = append(out, fitLine("Resize to at least 80x24.", width))
 			} else {
 				out = append(out, strings.Repeat(" ", width))
 			}
 		}
-		out = append(out, fitLine("Widen terminal for full 5-zone TUI", width))
+		out = append(out, strings.Repeat(" ", width))
 		return joinLines(out)
 	}
 
@@ -213,6 +261,7 @@ func renderDungeon(m Model) string {
 			for _, row := range m.obs.Dungeon.Grid {
 				cells := make([]string, 0, len(row))
 				for _, cell := range row {
+					safe := normalizeGlyph(cell)
 					switch cell {
 					case '.':
 						cells = append(cells, ". ")
@@ -229,10 +278,10 @@ func renderDungeon(m Model) string {
 					case '~':
 						cells = append(cells, "~~")
 					case 'm', 'h', 'x', 'v', '!':
-						u := strings.ToUpper(string(cell))
+						u := strings.ToUpper(string(safe))
 						cells = append(cells, u+u)
 					default:
-						cells = append(cells, string(cell)+" ")
+						cells = append(cells, string(safe)+" ")
 					}
 				}
 				viewport = append(viewport, strings.Join(cells, ""))

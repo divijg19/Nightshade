@@ -13,7 +13,8 @@ import (
 )
 
 type Options struct {
-	Dev bool
+	Dev           bool
+	ClientOptions appclient.RunOptions
 }
 
 func Run(opts Options) error {
@@ -89,7 +90,7 @@ func Run(opts Options) error {
 	bootstrap := common.BootstrapObservation(rt, rh.ID())
 	_ = inMem.Publish(transport.Snapshot{Observation: bootstrap, Energy: rh.Energy()})
 
-	clientErr := appclient.RunClient(inMem)
+	clientErr := appclient.RunClientWithOptions(inMem, opts.ClientOptions)
 	cancel()
 	rh.SetConnected(false)
 	<-bridgeDone

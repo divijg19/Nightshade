@@ -21,6 +21,8 @@ func defaultSocket() string {
 func main() {
 	socketFlag := flag.String("socket", defaultSocket(), "unix socket path (or set NIGHTSHADE_SOCKET)")
 	addrFlag := flag.String("addr", "", "tcp address (e.g. :4000) for multiplayer transport")
+	asciiFlag := flag.Bool("ascii", false, "force ASCII glyph fallback")
+	noColorFlag := flag.Bool("no-color", false, "disable terminal color output")
 	flag.Parse()
 
 	_, _, pubB64, err := persist.EnsureIdentity()
@@ -40,7 +42,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", transport.WrapNetworkError(err))
 		return
 	}
-	if err := appclient.RunClient(t); err != nil {
+	if err := appclient.RunClientWithOptions(t, appclient.RunOptions{ForceASCII: *asciiFlag, ForceNoColor: *noColorFlag}); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 	}
 }

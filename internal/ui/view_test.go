@@ -102,12 +102,12 @@ func TestPressureBarWidthStable(t *testing.T) {
 func TestMinimumSizeFallback(t *testing.T) {
 	in := make(chan tea.Msg, 1)
 	m := NewModel(in, &stubNet{})
-	m.width = 20
-	m.height = 5
+	m.width = 40
+	m.height = 10
 	m.hasObs = true
 	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}}}
 	v := m.View()
-	if !strings.Contains(v, "TERMINAL TOO SMALL") {
+	if !strings.Contains(v, "Terminal too small.") || !strings.Contains(v, "Resize to at least 80x24.") {
 		t.Fatalf("expected fallback message for small terminal")
 	}
 }
