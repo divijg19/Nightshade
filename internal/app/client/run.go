@@ -1,11 +1,11 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
+	"sync"
 
 	"github.com/divijg19/Nightshade/internal/app/transport"
 	"github.com/divijg19/Nightshade/internal/terminal"
@@ -33,10 +33,14 @@ func (a networkAdapter) Disconnect() error {
 }
 
 func RunClient(t transport.Transport) error {
-	return RunClientWithOptions(t, RunOptions{})
+	return RunClientWithContext(context.Background(), t, RunOptions{})
 }
 
 func RunClientWithOptions(t transport.Transport, opts RunOptions) (runErr error) {
+	return RunClientWithContext(context.Background(), t, opts)
+}
+
+func RunClientWithContext(ctx context.Context, t transport.Transport, opts RunOptions) (runErr error) {
 	defer t.Close()
 	defer func() {
 		r := recover()
@@ -64,21 +68,31 @@ func RunClientWithOptions(t transport.Transport, opts RunOptions) (runErr error)
 	})
 
 	app := ui.NewWithOptions(networkAdapter{transport: t}, ui.AppOptions{ShowSplash: opts.ShowSplash})
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
+	var closeOnce sync.Once
+	notifyClosed := func() {
+		closeOnce.Do(func() {
+			app.NotifyConnectionClosed()
+		})
+	}
 
 	go func() {
-		<-sigCh
+		select {
+		case <-ctx.Done():
+			_ = t.Close()
+			notifyClosed()
+		default:
+		}
+
+		<-ctx.Done()
 		_ = t.Close()
-		app.NotifyConnectionClosed()
+		notifyClosed()
 	}()
 
 	go func() {
 		for snap := range t.Snapshots() {
 			app.SendSnapshot(snap.Observation, snap.Energy)
 		}
-		app.NotifyConnectionClosed()
+		notifyClosed()
 	}()
 
 	_, err := app.Run()

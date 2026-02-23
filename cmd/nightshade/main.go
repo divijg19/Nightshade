@@ -27,7 +27,7 @@ func defaultSocket() string {
 	return filepath.Join(persist.BaseDir(), "socket")
 }
 
-func runClientMode(args []string) error {
+func runClientMode(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("client", flag.ContinueOnError)
 	socket := fs.String("socket", defaultSocket(), "unix socket path (or set NIGHTSHADE_SOCKET)")
 	addr := fs.String("addr", "", "tcp address (e.g. :4000) for multiplayer transport")
@@ -50,10 +50,10 @@ func runClientMode(args []string) error {
 	if err != nil {
 		return transport.WrapNetworkError(err)
 	}
-	return appclient.RunClientWithOptions(t, appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor})
+	return appclient.RunClientWithContext(ctx, t, appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor})
 }
 
-func runServerMode(args []string) error {
+func runServerMode(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("server", flag.ContinueOnError)
 	socket := fs.String("socket", appserver.DefaultSocket(), "unix socket path (or set NIGHTSHADE_SOCKET)")
 	addr := fs.String("addr", "", "tcp address (e.g. :4000) for multiplayer transport")
@@ -61,12 +61,10 @@ func runServerMode(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return appserver.RunContext(ctx, appserver.Options{Socket: *socket, Addr: *addr, Dev: *dev})
 }
 
-func runSingleProcess(args []string) error {
+func runSingleProcess(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("nightshade", flag.ContinueOnError)
 	dev := fs.Bool("dev", false, "enable dev mode: faster ticks")
 	ascii := fs.Bool("ascii", false, "force ASCII glyph fallback")
@@ -74,7 +72,7 @@ func runSingleProcess(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	return single.Run(single.Options{Dev: *dev, ClientOptions: appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor, ShowSplash: true}})
+	return single.RunContext(ctx, single.Options{Dev: *dev, ClientOptions: appclient.RunOptions{ForceASCII: *ascii, ForceNoColor: *noColor, ShowSplash: true}})
 }
 
 func runDiagnose(forceASCII bool, forceNoColor bool) error {
@@ -98,6 +96,9 @@ func printErrorAndExit(prefix string, err error) {
 }
 
 func main() {
+	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	args := os.Args[1:]
 	for _, a := range args {
 		if a == "--version" {
@@ -117,18 +118,18 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "server":
-			printErrorAndExit("nightshade server", runServerMode(args[1:]))
+			printErrorAndExit("nightshade server", runServerMode(rootCtx, args[1:]))
 			return
 		case "client":
-			printErrorAndExit("nightshade client", runClientMode(args[1:]))
+			printErrorAndExit("nightshade client", runClientMode(rootCtx, args[1:]))
 			return
 		}
 	}
 	if strings.TrimSpace(strings.Join(args, "")) == "" {
-		printErrorAndExit("nightshade", runSingleProcess(args))
+		printErrorAndExit("nightshade", runSingleProcess(rootCtx, args))
 		return
 	}
-	printErrorAndExit("nightshade", runSingleProcess(args))
+	printErrorAndExit("nightshade", runSingleProcess(rootCtx, args))
 }
 
 func hasFlag(args []string, flagName string) bool {

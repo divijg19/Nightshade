@@ -202,3 +202,43 @@ func TestNoLayoutDriftOnResize(t *testing.T) {
 		}
 	}
 }
+
+func TestMovementChangesRenderedGrid(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: true, ColorLevel: ColorNone})
+	defer SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 2)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+
+	obsA := agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#@..#"), []rune("#####")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	nextA, _ := m.Update(SnapshotMsg{Obs: obsA, Energy: 100})
+	mA := nextA.(Model)
+	vA := mA.View()
+
+	obsB := agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#..@#"), []rune("#####")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	nextB, _ := mA.Update(SnapshotMsg{Obs: obsB, Energy: 100})
+	mB := nextB.(Model)
+	vB := mB.View()
+
+	if vA == vB {
+		t.Fatalf("expected rendered output to change with player movement")
+	}
+	if !strings.Contains(vA, "@") || !strings.Contains(vB, "@") {
+		t.Fatalf("expected player glyph to remain visible in both frames")
+	}
+}
+
+func TestPhaseLineNotTruncated(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 80
+	m.height = 24
+	m.hasObs = true
+	m.obs = agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("###")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 3, MaxPressure: 20, CoreIntegrity: 88, Threat: "LOW"}}
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "PHASE: HUNTER") {
+		t.Fatalf("expected full PHASE line without clipping")
+	}
+}

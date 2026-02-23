@@ -18,6 +18,10 @@ type Options struct {
 }
 
 func Run(opts Options) error {
+	return RunContext(context.Background(), opts)
+}
+
+func RunContext(parent context.Context, opts Options) error {
 	_, _, pubB64, err := persist.EnsureIdentity()
 	if err != nil {
 		return err
@@ -29,8 +33,13 @@ func Run(opts Options) error {
 	rt := runtime.New([]agent.Agent{rh, npc})
 
 	inMem := transport.NewInMemoryTransport(64)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+
+	go func() {
+		<-ctx.Done()
+		_ = inMem.Close()
+	}()
 
 	tickDone := make(chan struct{})
 	go func() {
@@ -90,7 +99,7 @@ func Run(opts Options) error {
 	bootstrap := common.BootstrapObservation(rt, rh.ID())
 	_ = inMem.Publish(transport.Snapshot{Observation: bootstrap, Energy: rh.Energy()})
 
-	clientErr := appclient.RunClientWithOptions(inMem, opts.ClientOptions)
+	clientErr := appclient.RunClientWithContext(ctx, inMem, opts.ClientOptions)
 	cancel()
 	rh.SetConnected(false)
 	<-bridgeDone
