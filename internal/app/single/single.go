@@ -63,6 +63,21 @@ func RunContext(parent context.Context, opts Options) error {
 		}
 	}()
 
+	shutdownInputDone := make(chan struct{})
+	go func() {
+		defer close(shutdownInputDone)
+		<-ctx.Done()
+		for {
+			select {
+			case rh.RecvInput <- "CTRL_C":
+				return
+			case <-tickDone:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+
 	bridgeDone := make(chan struct{}, 2)
 	go func() {
 		defer func() { bridgeDone <- struct{}{} }()
@@ -105,5 +120,6 @@ func RunContext(parent context.Context, opts Options) error {
 	<-bridgeDone
 	<-bridgeDone
 	<-tickDone
+	<-shutdownInputDone
 	return clientErr
 }

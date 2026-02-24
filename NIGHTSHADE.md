@@ -67,7 +67,7 @@ The program makes no distinction between:
 * performer
 * synthetic construct
 
-If a difference exists, it is for the audience—not you.
+If a difference exists, it is for the audience- not you.
 
 ---
 
@@ -264,7 +264,7 @@ It is about:
 
 * being observed under constraint
 * making decisions without context
-* behaving while uncertain who—or what—is watching
+* behaving while uncertain who- or what- is watching
 
 If you feel watched, the program is working.
 

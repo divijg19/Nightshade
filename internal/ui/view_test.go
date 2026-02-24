@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/divijg19/Nightshade/internal/agent"
+	"github.com/divijg19/Nightshade/internal/core"
 )
 
 type stubNet struct {
@@ -211,12 +212,12 @@ func TestMovementChangesRenderedGrid(t *testing.T) {
 	m.width = 100
 	m.height = 28
 
-	obsA := agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#@..#"), []rune("#####")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	obsA := agent.Observation{Mode: "dungeon", Position: core.Position{X: 1, Y: 1}, Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#...#"), []rune("#####")}, PlayerPosKnown: true, PlayerX: 1, PlayerY: 1, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
 	nextA, _ := m.Update(SnapshotMsg{Obs: obsA, Energy: 100})
 	mA := nextA.(Model)
 	vA := mA.View()
 
-	obsB := agent.Observation{Mode: "dungeon", Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#..@#"), []rune("#####")}, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	obsB := agent.Observation{Mode: "dungeon", Position: core.Position{X: 2, Y: 1}, Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#...#"), []rune("#####")}, PlayerPosKnown: true, PlayerX: 2, PlayerY: 1, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
 	nextB, _ := mA.Update(SnapshotMsg{Obs: obsB, Energy: 100})
 	mB := nextB.(Model)
 	vB := mB.View()
@@ -226,6 +227,91 @@ func TestMovementChangesRenderedGrid(t *testing.T) {
 	}
 	if !strings.Contains(vA, "@") || !strings.Contains(vB, "@") {
 		t.Fatalf("expected player glyph to remain visible in both frames")
+	}
+	if strings.Count(stripANSI(vA), "@") != 1 || strings.Count(stripANSI(vB), "@") != 1 {
+		t.Fatalf("expected exactly one player glyph per frame")
+	}
+}
+
+func TestDungeonOverlayUsesSnapshotPlayerCoordinates(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: true, ColorLevel: ColorNone})
+	defer SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+	m.hasObs = true
+	m.obs = agent.Observation{
+		Mode:     "dungeon",
+		Position: core.Position{X: 99, Y: 99},
+		Dungeon: &agent.DungeonView{
+			Grid:             [][]rune{[]rune("#####"), []rune("#...#"), []rune("#####")},
+			PlayerPosKnown:   true,
+			PlayerX:          2,
+			PlayerY:          1,
+			InstabilityLabel: "STABLE",
+			Phase:            "HUNTER",
+			Pressure:         1,
+			MaxPressure:      20,
+			CoreIntegrity:    100,
+			Threat:           "LOW",
+		},
+	}
+	out := stripANSI(m.View())
+	if strings.Count(out, "@") != 1 {
+		t.Fatalf("expected exactly one player glyph from snapshot coordinates")
+	}
+}
+
+func TestDungeonOverlayNoDuplicatePlayerWhenEnemySharesTile(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: true, ColorLevel: ColorNone})
+	defer SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 1)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+	m.hasObs = true
+	m.obs = agent.Observation{
+		Mode: "dungeon",
+		Dungeon: &agent.DungeonView{
+			Grid:             [][]rune{[]rune("#####"), []rune("#...#"), []rune("#####")},
+			PlayerPosKnown:   true,
+			PlayerX:          2,
+			PlayerY:          1,
+			Enemies:          []agent.EnemyView{{X: 2, Y: 1, Kind: "HUNTER"}},
+			InstabilityLabel: "STABLE",
+			Phase:            "HUNTER",
+			Pressure:         1,
+			MaxPressure:      20,
+			CoreIntegrity:    100,
+			Threat:           "LOW",
+		},
+	}
+	out := stripANSI(m.View())
+	if strings.Count(out, "@") != 1 {
+		t.Fatalf("expected exactly one player glyph when enemy overlaps player")
+	}
+}
+
+func TestUnchangedPlayerPositionKeepsRenderedGrid(t *testing.T) {
+	SetPresentationOptions(PresentationOptions{ASCIIMode: true, ColorLevel: ColorNone})
+	defer SetPresentationOptions(PresentationOptions{ASCIIMode: false, ColorLevel: ColorTrue})
+	in := make(chan tea.Msg, 2)
+	m := NewModel(in, &stubNet{}, ModelOptions{})
+	m.width = 100
+	m.height = 28
+
+	obs := agent.Observation{Mode: "dungeon", Position: core.Position{X: 2, Y: 1}, Dungeon: &agent.DungeonView{Grid: [][]rune{[]rune("#####"), []rune("#...#"), []rune("#####")}, PlayerPosKnown: true, PlayerX: 2, PlayerY: 1, InstabilityLabel: "STABLE", Phase: "HUNTER", Pressure: 2, MaxPressure: 20, CoreIntegrity: 90, Threat: "LOW"}}
+	nextA, _ := m.Update(SnapshotMsg{Obs: obs, Energy: 100})
+	mA := nextA.(Model)
+	vA := mA.View()
+
+	nextB, _ := mA.Update(SnapshotMsg{Obs: obs, Energy: 100})
+	mB := nextB.(Model)
+	vB := mB.View()
+
+	if vA != vB {
+		t.Fatalf("expected identical rendered output when player position is unchanged")
 	}
 }
 

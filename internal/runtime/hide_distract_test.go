@@ -53,7 +53,7 @@ func TestDistractRetargetsForTwoTicks(t *testing.T) {
 	// place player near entity
 	rt.world.SetPosition(a.ID(), world.Position{X: e.Pos.X + 2, Y: e.Pos.Y})
 	// perform DISTRACT
-	a.RecvInput <- "d"
+	a.RecvInput <- "o"
 	rt.TickOnce()
 	// next two ticks, the nearest enemy should target anchor or exit (not player)
 	for i := 0; i < 2; i++ {

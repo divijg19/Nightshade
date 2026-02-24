@@ -114,3 +114,32 @@ func TestOneLineEventPriorityRuntime(t *testing.T) {
 		t.Fatalf("expected highest-priority event only, got %q", s.Event)
 	}
 }
+
+func TestRunSummaryPendingDoesNotBlockEnterSignal(t *testing.T) {
+	rt, a := setupSummaryRT(t)
+	d := rt.dungeonByAgent[a.ID()]
+	d.Entities = nil
+	d.ObjectiveCompleted = true
+	rt.world.SetPosition(a.ID(), world.Position{X: d.Exit.X, Y: d.Exit.Y + 1})
+
+	a.RecvInput <- "w"
+	rt.TickOnce()
+	_ = mustRecvObs(t, a)
+	a.RecvInput <- "."
+	rt.TickOnce()
+	obsSummary := mustRecvObs(t, a)
+	if obsSummary.RunSummary == nil {
+		t.Fatalf("expected run summary frame before re-entry")
+	}
+
+	a.RecvInput <- "ENTER_SIGNAL S001"
+	rt.TickOnce()
+	_ = mustRecvObs(t, a)
+
+	a.RecvInput <- "."
+	rt.TickOnce()
+	obsDungeon := mustRecvObs(t, a)
+	if obsDungeon.Mode != "dungeon" {
+		t.Fatalf("expected dungeon mode after enter while summary was pending, got %q", obsDungeon.Mode)
+	}
+}

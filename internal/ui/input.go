@@ -85,7 +85,7 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		if len(key) == 1 && key[0] >= '1' && key[0] <= '5' {
 			idx := int(key[0] - '1')
 			if idx >= 0 && idx < len(m.obs.Board.Signals) {
 				sid := m.obs.Board.Signals[idx].ID
@@ -97,16 +97,28 @@ func handleKey(m Model, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// Strict mode isolation: ignore dungeon controls on board mode.
+		switch key {
+		case "w", "a", "s", "d", "e", "o", "h", ".", "f", "1", "2", "3":
+			return m, nil
+		}
+	}
+
+	if m.obs.Mode != "dungeon" {
+		switch key {
+		case "w", "a", "s", "d", "e", "o", "h", ".", "f", "1", "2", "3":
+			return m, nil
+		}
 	}
 
 	switch key {
-	case "w", "a", "s", "d", "e", ".", "f", "1", "2", "3":
+	case "w", "a", "s", "d", "e", "o", "h", ".", "f", "1", "2", "3":
 		if key == "w" || key == "a" || key == "s" || key == "d" {
 			m.pendingMove = true
 			m.pendingBaseX = m.obs.Position.X
 			m.pendingBaseY = m.obs.Position.Y
 		}
-		desc := map[string]string{"w": "Move NORTH (-1)", "a": "Move WEST (-1)", "s": "Move SOUTH (-1)", "d": "Move EAST (-1)", "e": "Observe (-1)", ".": "Wait (+1)", "f": "Ability (F)", "1": "Path: Stabilizer", "2": "Path: Harvester", "3": "Path: Aggressor"}[key]
+		desc := map[string]string{"w": "Move NORTH (-1)", "a": "Move WEST (-1)", "s": "Move SOUTH (-1)", "d": "Move EAST (-1)", "e": "Observe (-1)", "o": "Distract (-3)", "h": "Hide (-2)", ".": "Wait (+1)", "f": "Ability (F)", "1": "Path: Stabilizer", "2": "Path: Harvester", "3": "Path: Aggressor"}[key]
 		m.pendingDesc = desc
 		if m.network != nil {
 			_ = m.network.SendInput(key)

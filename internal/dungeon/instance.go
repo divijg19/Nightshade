@@ -35,8 +35,16 @@ type MutatorTile struct {
 }
 
 const (
-	AnchorMemoryVault  AnchorType = "MEMORY_VAULT"
-	AnchorRecoveryNode AnchorType = "RECOVERY_NODE"
+	AnchorMemoryVault    AnchorType = "MEMORY_VAULT"
+	AnchorRecoveryNode   AnchorType = "RECOVERY_NODE"
+	defaultDungeonWidth  int        = 20
+	defaultDungeonHeight int        = 20
+)
+
+var (
+	defaultExitPos   = core.Position{X: defaultDungeonWidth / 2, Y: 0}
+	defaultAnchorPos = core.Position{X: defaultDungeonWidth / 2, Y: defaultDungeonHeight / 2}
+	defaultEntryPos  = core.Position{X: defaultDungeonWidth / 2, Y: defaultDungeonHeight - 1}
 )
 
 type Instance struct {
@@ -145,14 +153,14 @@ func NewInstance(id string, anchor AnchorType) *Instance {
 	objectiveTarget := objectiveTargetForType(objectiveType, len(purgeNodes))
 	inst := &Instance{
 		ID:                 id,
-		Width:              7,
-		Height:             7,
+		Width:              defaultDungeonWidth,
+		Height:             defaultDungeonHeight,
 		Pressure:           0,
 		MaxPressure:        20,
 		ExitStability:      8,
-		Entry:              core.Position{X: 3, Y: 6},
-		Anchor:             core.Position{X: 3, Y: 3},
-		Exit:               core.Position{X: 3, Y: 0},
+		Entry:              defaultEntryPos,
+		Anchor:             defaultAnchorPos,
+		Exit:               defaultExitPos,
 		AnchorType:         anchor,
 		Decayed:            make(map[core.Position]bool),
 		Entities:           []Entity{},
@@ -347,8 +355,8 @@ func computePurgeNodes(id string, n int) []core.Position {
 	for i := 0; i < len(id); i++ {
 		seed += int(id[i])
 	}
-	w := 7 - 2
-	h := 7 - 2
+	w := defaultDungeonWidth - 2
+	h := defaultDungeonHeight - 2
 	if w <= 0 {
 		w = 1
 	}
@@ -360,9 +368,9 @@ func computePurgeNodes(id string, n int) []core.Position {
 		y := 1 + ((seed + i*7) % h)
 		p := core.Position{X: x, Y: y}
 		// avoid anchor/exit
-		if p == (core.Position{X: 3, Y: 3}) || p == (core.Position{X: 3, Y: 0}) {
-			p.X = (p.X % (7 - 2)) + 1
-			p.Y = (p.Y % (7 - 2)) + 1
+		if p == defaultAnchorPos || p == defaultExitPos {
+			p.X = (p.X % w) + 1
+			p.Y = (p.Y % h) + 1
 		}
 		nodes = append(nodes, p)
 	}
@@ -570,8 +578,8 @@ func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
 	for i := 0; i < len(id); i++ {
 		seed += int(id[i])
 	}
-	w := 7 - 2
-	h := 7 - 2
+	w := defaultDungeonWidth - 2
+	h := defaultDungeonHeight - 2
 	if w <= 0 {
 		w = 1
 	}
@@ -583,9 +591,9 @@ func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
 	c := core.Position{X: 1 + ((seed + 13) % w), Y: 1 + ((seed * 11) % h)}
 	// avoid collisions with anchor/exit (3,3) and ensure distinctness
 	safe := func(p core.Position) core.Position {
-		if p == (core.Position{X: 3, Y: 3}) || p == (core.Position{X: 3, Y: 0}) {
-			p.X = (p.X % (7 - 2)) + 1
-			p.Y = (p.Y % (7 - 2)) + 1
+		if p == defaultAnchorPos || p == defaultExitPos {
+			p.X = (p.X % w) + 1
+			p.Y = (p.Y % h) + 1
 		}
 		return p
 	}
@@ -594,10 +602,10 @@ func computeRiskNodes(id string) (core.Position, core.Position, core.Position) {
 	c = safe(c)
 	// ensure uniqueness by nudging if equal
 	if a == b {
-		b.X = (b.X % (7 - 2)) + 1
+		b.X = (b.X % w) + 1
 	}
 	if a == c || b == c {
-		c.Y = (c.Y % (7 - 2)) + 1
+		c.Y = (c.Y % h) + 1
 	}
 	return a, b, c
 }
