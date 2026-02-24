@@ -23,6 +23,8 @@ func TestForcedEject_AtThreshold(t *testing.T) {
 		t.Fatalf("expected dungeon after enter")
 	}
 	max := d.MaxPressure
+	scarPos := core.Position{}
+	hasScarPos := false
 
 	// Tick until threshold. On the tick when pressure reaches MaxPressure,
 	// the agent should be ejected and see a board-mode snapshot.
@@ -33,6 +35,10 @@ func TestForcedEject_AtThreshold(t *testing.T) {
 		if i < max {
 			if obs.Mode != "dungeon" {
 				t.Fatalf("expected dungeon mode before eject (i=%d), got %q", i, obs.Mode)
+			}
+			if !hasScarPos {
+				scarPos = obs.Position
+				hasScarPos = true
 			}
 		} else {
 			if obs.Mode != "board" {
@@ -53,9 +59,12 @@ func TestForcedEject_AtThreshold(t *testing.T) {
 			if s.LockedBy != "" {
 				t.Fatalf("expected S000 to be unlocked after burn, lockedBy=%q", s.LockedBy)
 			}
-			// memory scar applied at agent position
-			if mt, found := a.Memory().GetMemoryTile(core.Position{X: 0, Y: 0}); !found || mt.ScarLevel < 1 {
-				t.Fatalf("expected scar applied to agent memory at pos (0,0), got found=%v scar=%d", found, mt.ScarLevel)
+			if !hasScarPos {
+				t.Fatalf("expected to capture dungeon position for scar assertion")
+			}
+			// memory scar applied at the authoritative player position
+			if mt, found := a.Memory().GetMemoryTile(scarPos); !found || mt.ScarLevel < 1 {
+				t.Fatalf("expected scar applied to agent memory at pos %+v, got found=%v scar=%d", scarPos, found, mt.ScarLevel)
 			}
 		}
 	}

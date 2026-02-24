@@ -57,3 +57,19 @@ func TestInstabilityBand_ResetsOnNewDungeon(t *testing.T) {
 		t.Fatalf("expected new dungeon band=0")
 	}
 }
+
+func TestDefaultDungeonDimensionsAre20x20(t *testing.T) {
+	d := NewInstance("D", AnchorMemoryVault)
+	if d.Width != 20 || d.Height != 20 {
+		t.Fatalf("expected 20x20 dungeon, got %dx%d", d.Width, d.Height)
+	}
+	if d.Entry.X != 10 || d.Entry.Y != 19 {
+		t.Fatalf("unexpected entry position: %+v", d.Entry)
+	}
+	if d.Anchor.X != 10 || d.Anchor.Y != 10 {
+		t.Fatalf("unexpected anchor position: %+v", d.Anchor)
+	}
+	if d.Exit.X != 10 || d.Exit.Y != 0 {
+		t.Fatalf("unexpected exit position: %+v", d.Exit)
+	}
+}

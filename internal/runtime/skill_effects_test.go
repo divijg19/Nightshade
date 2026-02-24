@@ -171,7 +171,7 @@ func TestExtendedDistractDuration(t *testing.T) {
 	e := d.Entities[0]
 	rt.world.SetPosition(a.ID(), world.Position{X: e.Pos.X + 2, Y: e.Pos.Y})
 	// perform DISTRACT
-	a.RecvInput <- "d"
+	a.RecvInput <- "o"
 	rt.TickOnce()
 	// next three ticks, enemy should not target player (extended -> 3 ticks)
 	for i := 0; i < 3; i++ {

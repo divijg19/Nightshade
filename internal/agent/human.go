@@ -67,10 +67,12 @@ func keyToActionContext(key string, inDungeon bool) Action {
 	case 'a':
 		return MOVE_W
 	case 'd':
+		return MOVE_E
+	case 'o':
 		if inDungeon {
 			return DISTRACT
 		}
-		return MOVE_E
+		return WAIT
 	case 'h':
 		if inDungeon {
 			return HIDE

@@ -88,6 +88,9 @@ type RunSummaryView struct {
 // It is presentation-only.
 type DungeonView struct {
 	Grid               [][]rune `json:"grid,omitempty"`
+	PlayerPosKnown     bool     `json:"player_pos_known,omitempty"`
+	PlayerX            int      `json:"player_x,omitempty"`
+	PlayerY            int      `json:"player_y,omitempty"`
 	Pressure           int      `json:"pressure"`
 	MaxPressure        int      `json:"max_pressure"`
 	Tick               int      `json:"tick"`

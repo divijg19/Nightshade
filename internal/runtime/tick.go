@@ -10,6 +10,7 @@ import (
 	"github.com/divijg19/Nightshade/internal/game"
 	"github.com/divijg19/Nightshade/internal/persist"
 	"github.com/divijg19/Nightshade/internal/util"
+	"github.com/divijg19/Nightshade/internal/world"
 )
 
 type Decisions map[string]agent.Action
@@ -641,13 +642,15 @@ func (r *Runtime) TickOnce() Decisions {
 				}
 			}
 			if r.runSummaryAwaitAck[a.ID()] {
-				if strings.TrimSpace(in) == "." {
+				if strings.TrimSpace(in) != "" {
 					delete(r.runSummaryAwaitAck, a.ID())
 					delete(r.runSummaryByAgent, a.ID())
 					delete(r.runSummaryShown, a.ID())
 				}
-				inputs[a.ID()] = ""
-				continue
+				if strings.TrimSpace(in) == "" {
+					inputs[a.ID()] = ""
+					continue
+				}
 			}
 			// v0.3.0: server-authoritative dungeon commitment command.
 			if signalID, ok2 := parseEnterSignal(in); ok2 {
@@ -950,12 +953,27 @@ func (r *Runtime) TickOnce() Decisions {
 
 		decisions[a.ID()] = authoritative
 
+		moveWidth := r.world.Width()
+		moveHeight := r.world.Height()
+		if inDungeon && inst != nil {
+			moveWidth = inst.Width
+			moveHeight = inst.Height
+		}
 		newPos := game.ResolveMovement(
 			pos,
 			authoritative,
-			r.world.Width(),
-			r.world.Height(),
+			moveWidth,
+			moveHeight,
 		)
+		if inDungeon && inst != nil {
+			np := core.Position{X: newPos.X, Y: newPos.Y}
+			switch authoritative {
+			case agent.MOVE_N, agent.MOVE_S, agent.MOVE_E, agent.MOVE_W:
+				if inst.GlyphAt(np) == '#' {
+					newPos = pos
+				}
+			}
+		}
 
 		// If agent is inside a dungeon and steps onto a risk node, apply deterministic effects
 		if d, ok := r.dungeonByAgent[a.ID()]; ok && d != nil {
@@ -1254,6 +1272,20 @@ func (r *Runtime) tryEnterSignal(agentID string, signalID string) bool {
 	}
 	r.dungeonByAgent[agentID] = inst
 	r.signalByAgent[agentID] = signalID
+	spawn := inst.Entry
+	if spawn.X <= 0 {
+		spawn.X = 1
+	}
+	if spawn.X >= inst.Width-1 {
+		spawn.X = inst.Width - 2
+	}
+	if spawn.Y <= 0 {
+		spawn.Y = 1
+	}
+	if spawn.Y >= inst.Height-1 {
+		spawn.Y = inst.Height - 2
+	}
+	r.world.SetPosition(agentID, world.Position{X: spawn.X, Y: spawn.Y})
 	// ensure progress record exists
 	if _, ok := r.progressByAgent[agentID]; !ok {
 		if p, err := persist.LoadProgress(agentID); err == nil {
@@ -1391,6 +1423,9 @@ func (r *Runtime) snapshotFor(a agent.Agent, action agent.Action) Snapshot {
 
 		snap.Dungeon = agent.DungeonView{
 			Grid:               grid,
+			PlayerPosKnown:     true,
+			PlayerX:            snap.Position.X,
+			PlayerY:            snap.Position.Y,
 			Pressure:           d.Pressure,
 			MaxPressure:        d.MaxPressure,
 			Tick:               snap.Tick,

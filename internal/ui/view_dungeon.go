@@ -501,8 +501,30 @@ func renderDungeon(m Model) string {
 	instability := "-"
 	if m.obs.Dungeon != nil {
 		if len(m.obs.Dungeon.Grid) > 0 {
-			viewport = make([]string, 0, len(m.obs.Dungeon.Grid))
-			for _, row := range m.obs.Dungeon.Grid {
+			overlay := make([][]rune, len(m.obs.Dungeon.Grid))
+			for y := range m.obs.Dungeon.Grid {
+				overlay[y] = make([]rune, len(m.obs.Dungeon.Grid[y]))
+				copy(overlay[y], m.obs.Dungeon.Grid[y])
+			}
+			// Priority 2: enemies overlay special/base tiles.
+			for _, e := range m.obs.Dungeon.Enemies {
+				if e.Y >= 0 && e.Y < len(overlay) && e.X >= 0 && e.X < len(overlay[e.Y]) {
+					overlay[e.Y][e.X] = 'm'
+				}
+			}
+			// Priority 1: player overlay always dominates.
+			playerX := m.obs.Position.X
+			playerY := m.obs.Position.Y
+			if m.obs.Dungeon.PlayerPosKnown {
+				playerX = m.obs.Dungeon.PlayerX
+				playerY = m.obs.Dungeon.PlayerY
+			}
+			if playerY >= 0 && playerY < len(overlay) && playerX >= 0 && playerX < len(overlay[playerY]) {
+				overlay[playerY][playerX] = '@'
+			}
+
+			viewport = make([]string, 0, len(overlay))
+			for _, row := range overlay {
 				cells := make([]string, 0, len(row))
 				for _, cell := range row {
 					safe := normalizeGlyph(cell)
@@ -512,7 +534,7 @@ func renderDungeon(m Model) string {
 					case '#':
 						cells = append(cells, "##")
 					case '@':
-						cells = append(cells, styleColor(ColorHighlight, "@")+" ")
+						cells = append(cells, styleBoldColor(ColorHighlight, "@")+" ")
 					case 'C', 'c':
 						cells = append(cells, "CC")
 					case 'E', 'e':
